@@ -27,7 +27,7 @@ jobs:
         uses: aws-actions/configure-aws-credentials@v6
         with:
           aws-region: ${{ secrets.AWS_REGION }}
-          role-to-assume: "arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/${{ secrets.AWS_ROLE_ECR }}"
+          role-to-assume: "arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/${{ secrets.AWS_ROLE_UPDATE_LAMBDA }}"
           role-session-name: "market-data-updater-${{ github.run_id }}"
           retry-max-attempts: 3
           mask-aws-account-id: true
