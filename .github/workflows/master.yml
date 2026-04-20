@@ -1,11 +1,11 @@
-name: Build master and create tag
+name: Build master and deploy to lambda
 
 on:
   push:
     branches: master
 
 jobs:
-  create-tag:
+  build-and-deploy:
     runs-on: ubuntu-latest
     permissions:
       id-token: write
