@@ -1328,9 +1328,9 @@ dependencies = [
 
 [[package]]
 name = "digdigdig3"
-version = "0.1.31"
+version = "0.1.32"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "24a0951cd5ff91db7ab6892b61ef3cd68adc56b578204413dbf6b2f23d738df2"
+checksum = "8a650131dc00bf3cee61286907ea006dc9cf55604ab61968cef048d8191cdfd6"
 dependencies = [
  "async-trait",
  "base64",
