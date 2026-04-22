@@ -1,13 +1,18 @@
-use lambda_runtime::{Error, LambdaEvent, run, service_fn};
-use serde_json::Value;
+use crate::{compacter::compact_all, constants::S3_BUCKET, s3::clients, updater::update};
 
-async fn scheduled_task(_event: LambdaEvent<Value>) -> Result<(), Error> {
-    tracing::info!("Hello");
-    Ok(())
-}
+mod compacter;
+mod constants;
+mod quantized_time;
+mod s3;
+mod subfolders;
+mod updater;
 
 #[tokio::main]
-async fn main() -> Result<(), Error> {
-    tracing_subscriber::fmt().json().with_target(false).init();
-    run(service_fn(scheduled_task)).await
+async fn main() -> anyhow::Result<()> {
+    let (s3_client, transfer_client) = clients().await;
+    let bucket = S3_BUCKET;
+    let testnet = true;
+    update(&transfer_client, bucket, testnet).await?;
+    compact_all(&s3_client, &transfer_client, bucket).await?;
+    Ok(())
 }
