@@ -14,10 +14,8 @@ pub const MINUTES: [i32; 10] = [0, 6, 12, 18, 24, 30, 36, 42, 48, 54];
 pub const HOURS: [i32; 6] = [0, 4, 8, 12, 16, 20];
 pub const MONTHS: [i32; 4] = [0, 3, 6, 9];
 
-const COMMON_EXCHANGE_SYMBOLS: &[(ExchangeId, &[(&str, &[&str])])] = &[
-    (ExchangeId::Binance, &[("BTC", &["USDT"])]),
-    (ExchangeId::Coinbase, &[("BTC", &["USD"])]),
-];
+const COMMON_EXCHANGE_SYMBOLS: &[(ExchangeId, &[(&str, &[&str])])] =
+    &[(ExchangeId::Coinbase, &[("BTC", &["USD"])])];
 
 pub fn common_symbols() -> HashMap<ExchangeId, Vec<Symbol>> {
     COMMON_EXCHANGE_SYMBOLS
