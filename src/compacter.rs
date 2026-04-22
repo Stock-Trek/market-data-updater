@@ -8,6 +8,7 @@ use aws_sdk_s3_transfer_manager::Client as TransferClient;
 use bytes::Bytes;
 use parquet::arrow::{ArrowWriter, arrow_reader::ParquetRecordBatchReader};
 use tokio::task::JoinSet;
+use tracing::info;
 
 struct SubfoldersFiles {
     pub subfolders: Vec<String>,
@@ -19,6 +20,7 @@ pub async fn compact_all(
     transfer_client: &TransferClient,
     bucket: &str,
 ) -> Result<()> {
+    info!("compact all");
     compact_folder(&s3_client, &transfer_client, bucket, "", PARQUET_SUFFIX).await
 }
 
@@ -29,6 +31,7 @@ async fn compact_folder(
     prefix: &str,
     suffix: &str,
 ) -> Result<()> {
+    info!("compact folder with prefix {}", prefix);
     let expected_subfolders = get_subfolders_from_path(prefix)?;
     let subfolders_files = find_subfolders_files(s3_client, bucket, prefix, suffix).await?;
     for expected in &expected_subfolders {
@@ -74,6 +77,7 @@ async fn find_subfolders_files(
     prefix: &str,
     suffix: &str,
 ) -> Result<SubfoldersFiles> {
+    info!("find subfolders and files for prefix {}", prefix);
     let mut list_request = s3_client.list_objects_v2().bucket(bucket).delimiter("/");
     if !prefix.is_empty() {
         list_request = list_request.prefix(prefix);
@@ -107,6 +111,7 @@ async fn compact_files(
     files: &Vec<String>,
     compacted_file: &str,
 ) -> Result<()> {
+    info!("compact files {} to {}", files, compacted_file);
     if files.is_empty() {
         println!("No data to compact");
         return Ok(());
@@ -124,6 +129,7 @@ async fn download_batches(
     bucket: &str,
     files: &Vec<String>,
 ) -> Result<(Vec<RecordBatch>, SchemaRef)> {
+    info!("download batches for files {}", files);
     if files.is_empty() {
         anyhow::bail!("No files provided");
     }
@@ -154,6 +160,7 @@ async fn download_batches_for_key(
     bucket: &str,
     key: &str,
 ) -> Result<Vec<RecordBatch>> {
+    info!("download batches for key {}", key);
     let bytes = s3::download_bytes(&transfer_client, &bucket, &key).await?;
     let reader = ParquetRecordBatchReader::try_new(bytes, 1024 * 1024)?;
     let batches = reader.collect::<Result<Vec<RecordBatch>, _>>()?;

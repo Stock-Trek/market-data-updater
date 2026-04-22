@@ -1,4 +1,6 @@
 use crate::{compacter::compact_all, constants::S3_BUCKET, s3::clients, updater::update};
+use anyhow::Result;
+use tracing_subscriber::{EnvFilter, fmt::Subscriber};
 
 mod compacter;
 mod constants;
@@ -9,10 +11,18 @@ mod updater;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    setup_tracing();
     let (s3_client, transfer_client) = clients().await;
     let bucket = S3_BUCKET;
     let testnet = true;
     update(&transfer_client, bucket, testnet).await?;
     compact_all(&s3_client, &transfer_client, bucket).await?;
+    Ok(())
+}
+
+fn setup_tracing() -> Result<()> {
+    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
+    let subscriber = Subscriber::builder().with_env_filter(filter).finish();
+    tracing::subscriber::set_global_default(subscriber).expect("Failed to set subscriber");
     Ok(())
 }

@@ -10,6 +10,7 @@ use digdigdig3::{
 use parquet::arrow::ArrowWriter;
 use std::sync::Arc;
 use tokio::{sync::Semaphore, task::JoinSet};
+use tracing::info;
 
 use crate::{
     constants::{KLINE_LIMIT, PARQUET_SUFFIX, UPDATE_QUANTIZATION, common_symbols},
@@ -19,6 +20,7 @@ use crate::{
 };
 
 pub async fn update(transfer_client: &TransferClient, bucket: &str, testnet: bool) -> Result<()> {
+    info!("update, testnet={}", testnet);
     let now = Utc::now();
     let schema = create_schema();
     let top = quantized_timestamp(now, UPDATE_QUANTIZATION);
@@ -68,6 +70,7 @@ async fn update_exchange(
     suffix: &str,
     testnet: bool,
 ) -> Result<()> {
+    info!("update exchange {} @ {}", exchange_id, top);
     let connector = ConnectorFactory::create_public(exchange_id, testnet).await?;
     let year = top.year();
     let month = top.month() as i32;
@@ -79,6 +82,7 @@ async fn update_exchange(
     let semaphore = Arc::new(Semaphore::new(10));
     let mut join_set = JoinSet::new();
     for symbol in symbols {
+        info!("update symbol {}", symbol);
         let connector = connector.clone();
         let bucket = bucket.to_string();
         let candles_relative_file_path = candles_relative_file_path.clone();
