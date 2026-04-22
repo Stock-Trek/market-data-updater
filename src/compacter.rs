@@ -8,7 +8,7 @@ use aws_sdk_s3_transfer_manager::Client as TransferClient;
 use bytes::Bytes;
 use parquet::arrow::{ArrowWriter, arrow_reader::ParquetRecordBatchReader};
 use tokio::task::JoinSet;
-use tracing::info;
+use tracing::{error, info, warn};
 
 struct SubfoldersFiles {
     pub subfolders: Vec<String>,
@@ -114,7 +114,7 @@ async fn compact_files(
 ) -> Result<()> {
     info!("compact files {:?} to {}", files, compacted_file);
     if files.is_empty() {
-        println!("No data to compact");
+        warn!("No data to compact");
         return Ok(());
     }
     let (batches, schema) = download_batches(transfer_client, bucket, files).await?;
@@ -132,6 +132,7 @@ async fn download_batches(
 ) -> Result<(Vec<RecordBatch>, SchemaRef)> {
     info!("download batches for files {:?}", files);
     if files.is_empty() {
+        error!("No files provided");
         anyhow::bail!("No files provided");
     }
     let bucket_owned = bucket.to_string();
