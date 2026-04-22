@@ -45,19 +45,23 @@ async fn compact_folder(
         .await?;
     }
     let expected_subfolders = get_subfolders_from_path(prefix)?;
+    if expected_subfolders.is_empty() {
+        info!("no expected subfolders for {}", prefix);
+        return Ok(());
+    }
     let expected_files = expected_subfolders
         .iter()
         .map(|f| format!("{}{}{}", prefix, f, suffix))
         .collect::<Vec<_>>();
-    if expected_files.is_empty() {
-        return Ok(());
-    }
-    let has_all = expected_files
+    let missing = expected_files
         .iter()
         .filter(|expected| !subfolders_files.files.contains(expected))
-        .collect::<Vec<_>>()
-        .is_empty();
-    if !has_all {
+        .collect::<Vec<_>>();
+    if !missing.is_empty() {
+        info!(
+            "{} has expected files {:?} but is missing {:?}",
+            prefix, expected_files, missing
+        );
         return Ok(());
     }
     let compacted_file = format!("{}{}", prefix.trim_end_matches('/'), suffix);
