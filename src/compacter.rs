@@ -21,7 +21,8 @@ pub async fn compact_all(
     bucket: &str,
 ) -> Result<()> {
     info!("compact all");
-    compact_folder(&s3_client, &transfer_client, bucket, "", PARQUET_SUFFIX).await
+    compact_folder(&s3_client, &transfer_client, bucket, "", PARQUET_SUFFIX).await?;
+    Ok(())
 }
 
 async fn compact_folder(
