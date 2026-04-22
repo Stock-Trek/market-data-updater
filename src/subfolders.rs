@@ -1,20 +1,12 @@
 use crate::constants::{HOURS, MINUTES, MONTHS};
-use anyhow::{Error, anyhow};
-use chrono::{Datelike, Utc};
-
-const FIRST_YEAR: i32 = 2018;
+use anyhow::anyhow;
 
 pub fn get_subfolders_from_path(path: &str) -> anyhow::Result<Vec<String>> {
     let segments: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
     match segments.len() {
-        0 => Err(Error::msg("Could not find exchange")),
-        1 => {
-            let current_year = Utc::now().year();
-            let year_indexes: Vec<i32> = (FIRST_YEAR..current_year).map(|d| d as i32).collect();
-            Ok(subfolders(&year_indexes))
-        }
-        2 => Ok(subfolders(&MONTHS)),
-        3 => {
+        0 | 1 | 2 | 3 => Ok(Vec::new()),
+        4 => Ok(subfolders(&MONTHS)),
+        5 => {
             if let (Ok(year), Ok(month)) = (segments[0].parse::<i32>(), segments[1].parse::<u32>())
             {
                 let days_in_month = get_days_in_month(year, month);
@@ -27,9 +19,9 @@ pub fn get_subfolders_from_path(path: &str) -> anyhow::Result<Vec<String>> {
                 )))
             }
         }
-        4 => Ok(subfolders(&HOURS)),
-        5 => Ok(subfolders(&MINUTES)),
-        6 => Ok(Vec::new()),
+        6 => Ok(subfolders(&HOURS)),
+        7 => Ok(subfolders(&MINUTES)),
+        8 => Ok(Vec::new()),
         _ => Err(anyhow!(format!(
             "Cannot get subfolders from path with too many delimiters {}",
             path

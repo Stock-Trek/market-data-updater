@@ -32,25 +32,26 @@ async fn compact_folder(
     suffix: &str,
 ) -> Result<()> {
     info!("compact folder with prefix {}", prefix);
-    let expected_subfolders = get_subfolders_from_path(prefix)?;
     let subfolders_files = find_subfolders_files(s3_client, bucket, prefix, suffix).await?;
-    for expected in &expected_subfolders {
-        let expected_full_path = format!("{}{}", prefix, expected);
-        if subfolders_files.subfolders.contains(&expected_full_path) {
-            Box::pin(compact_folder(
-                s3_client,
-                transfer_client,
-                bucket,
-                &expected_full_path,
-                suffix,
-            ))
-            .await?;
-        }
+    for subfolder in &subfolders_files.subfolders {
+        let subfolder_full_path = format!("{}{}", prefix, subfolder);
+        Box::pin(compact_folder(
+            s3_client,
+            transfer_client,
+            bucket,
+            &subfolder_full_path,
+            suffix,
+        ))
+        .await?;
     }
+    let expected_subfolders = get_subfolders_from_path(prefix)?;
     let expected_files = expected_subfolders
         .iter()
         .map(|f| format!("{}{}{}", prefix, f, suffix))
         .collect::<Vec<_>>();
+    if expected_files.is_empty() {
+        return Ok(());
+    }
     let has_all = expected_files
         .iter()
         .filter(|expected| !subfolders_files.files.contains(expected))
@@ -59,7 +60,7 @@ async fn compact_folder(
     if !has_all {
         return Ok(());
     }
-    let compacted_file = format!("{}{}", prefix, suffix);
+    let compacted_file = format!("{}{}", prefix.trim_end_matches('/'), suffix);
     compact_files(
         s3_client,
         transfer_client,
