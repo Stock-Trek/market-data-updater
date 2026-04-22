@@ -10,8 +10,8 @@ mod subfolders;
 mod updater;
 
 #[tokio::main]
-async fn main() -> anyhow::Result<()> {
-    setup_tracing();
+async fn main() -> Result<()> {
+    setup_tracing()?;
     let (s3_client, transfer_client) = clients().await;
     let bucket = S3_BUCKET;
     let testnet = true;
