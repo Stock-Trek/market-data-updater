@@ -23,7 +23,7 @@ async fn main() -> Result<()> {
 fn setup_tracing() -> Result<()> {
     let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
     let subscriber = Subscriber::builder()
-        .with_ansi(true)
+        .with_ansi(false)
         .with_env_filter(filter)
         .finish();
     tracing::subscriber::set_global_default(subscriber).expect("Failed to set subscriber");
