@@ -92,7 +92,7 @@ async fn find_subfolders_files(
             page.common_prefixes()
                 .iter()
                 .flat_map(|cp| cp.prefix())
-                .map(|s| s.to_string()),
+                .map(|s| s.strip_prefix(prefix).unwrap_or(s).to_string()),
         );
         for object in page.contents() {
             if let Some(key) = object.key() {
@@ -168,6 +168,7 @@ async fn download_batches_for_key(
     Ok(batches)
 }
 
+// TODO combine batches by timestamp instead of just concatenating
 fn combine_batches(batches: &[RecordBatch], schema: &SchemaRef) -> Result<RecordBatch> {
     if batches.is_empty() {
         return Err(anyhow!("No batches to combine"));
