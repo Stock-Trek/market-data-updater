@@ -65,6 +65,7 @@ async fn compact_folder(
         return Ok(());
     }
     let compacted_file = format!("{}{}", prefix.trim_end_matches('/'), suffix);
+    info!("compact files {:?} to {}", expected_files, compacted_file);
     compact_files(
         s3_client,
         transfer_client,
