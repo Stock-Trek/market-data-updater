@@ -111,7 +111,7 @@ async fn compact_files(
     files: &Vec<String>,
     compacted_file: &str,
 ) -> Result<()> {
-    info!("compact files {} to {}", files, compacted_file);
+    info!("compact files {:?} to {}", files, compacted_file);
     if files.is_empty() {
         println!("No data to compact");
         return Ok(());
@@ -129,7 +129,7 @@ async fn download_batches(
     bucket: &str,
     files: &Vec<String>,
 ) -> Result<(Vec<RecordBatch>, SchemaRef)> {
-    info!("download batches for files {}", files);
+    info!("download batches for files {:?}", files);
     if files.is_empty() {
         anyhow::bail!("No files provided");
     }

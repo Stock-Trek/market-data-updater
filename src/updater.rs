@@ -70,7 +70,7 @@ async fn update_exchange(
     suffix: &str,
     testnet: bool,
 ) -> Result<()> {
-    info!("update exchange {} @ {}", exchange_id, top);
+    info!("update exchange {:?} @ {}", exchange_id, top);
     let connector = ConnectorFactory::create_public(exchange_id, testnet).await?;
     let year = top.year();
     let month = top.month() as i32;
