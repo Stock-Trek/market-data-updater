@@ -35,5 +35,5 @@ jobs:
       - name: Update lambda code
         run: |
           aws lambda update-function-code \
-            --function-name stock-trek-market-data-updater \
+            --function-name stock-trek-market-data \
             --zip-file fileb://target/lambda/market-data-updater/bootstrap.zip
