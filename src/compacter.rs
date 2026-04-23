@@ -52,7 +52,14 @@ async fn compact_folder(
     }
     let expected_files = expected_subfolders
         .iter()
-        .map(|f| format!("{}{}{}", prefix, f, suffix))
+        .map(|f| {
+            format!(
+                "{}{}{}",
+                prefix,
+                f.strip_suffix('/').or(Some(f)).unwrap(),
+                suffix
+            )
+        })
         .collect::<Vec<_>>();
     let missing = expected_files
         .iter()
@@ -175,7 +182,6 @@ async fn download_batches_for_key(
     Ok(batches)
 }
 
-// TODO combine batches by timestamp instead of just concatenating
 fn combine_batches(batches: &[RecordBatch], schema: &SchemaRef) -> Result<RecordBatch> {
     if batches.is_empty() {
         return Err(anyhow!("No batches to combine"));
