@@ -12,17 +12,8 @@ mod updater;
 
 #[tokio::main]
 async fn main() -> Result<(), Error> {
-    run(service_fn(function_handler)).await
-}
-
-async fn function_handler(_event: LambdaEvent<Value>) -> Result<Value, Error> {
     setup_tracing()?;
-    let (s3_client, transfer_client) = clients().await;
-    let bucket = S3_BUCKET;
-    let testnet = true;
-    update(&s3_client, &transfer_client, bucket, testnet).await?;
-    compact_all(&s3_client, &transfer_client, bucket).await?;
-    Ok(json!({ "status": "ok" }))
+    run(service_fn(function_handler)).await
 }
 
 fn setup_tracing() -> Result<(), Error> {
@@ -33,4 +24,13 @@ fn setup_tracing() -> Result<(), Error> {
         .finish();
     tracing::subscriber::set_global_default(subscriber).expect("Failed to set subscriber");
     Ok(())
+}
+
+async fn function_handler(_event: LambdaEvent<Value>) -> Result<Value, Error> {
+    let (s3_client, transfer_client) = clients().await;
+    let bucket = S3_BUCKET;
+    let testnet = true;
+    update(&s3_client, &transfer_client, bucket, testnet).await?;
+    compact_all(&s3_client, &transfer_client, bucket).await?;
+    Ok(json!({ "status": "ok" }))
 }
