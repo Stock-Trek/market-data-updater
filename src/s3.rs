@@ -22,6 +22,23 @@ async fn transfer_client() -> TransferClient {
     TransferClient::new(config)
 }
 
+pub async fn has_file(
+    s3_client: &S3Client,
+    bucket: &impl AsRef<str>,
+    key: &impl AsRef<str>,
+) -> bool {
+    match s3_client
+        .head_object()
+        .bucket(bucket.as_ref())
+        .key(key.as_ref())
+        .send()
+        .await
+    {
+        Ok(_) => true,
+        _ => false,
+    }
+}
+
 #[allow(dead_code)]
 pub async fn delete_file(
     s3_client: &S3Client,

@@ -15,7 +15,7 @@ async fn main() -> Result<()> {
     let (s3_client, transfer_client) = clients().await;
     let bucket = S3_BUCKET;
     let testnet = true;
-    update(&transfer_client, bucket, testnet).await?;
+    update(&s3_client, &transfer_client, bucket, testnet).await?;
     compact_all(&s3_client, &transfer_client, bucket).await?;
     Ok(())
 }

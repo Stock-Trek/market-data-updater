@@ -1,6 +1,7 @@
 use anyhow::Result;
 use arrow_array::{ArrayRef, Float64Array, Int64Array, RecordBatch};
 use arrow_schema::{DataType, Field, Schema, SchemaRef};
+use aws_sdk_s3::Client as S3Client;
 use aws_sdk_s3_transfer_manager::Client as TransferClient;
 use bytes::Bytes;
 use chrono::{DateTime, Datelike, Timelike, Utc};
@@ -19,18 +20,25 @@ use crate::{
     subfolders::file_path,
 };
 
-pub async fn update(transfer_client: &TransferClient, bucket: &str, testnet: bool) -> Result<()> {
+pub async fn update(
+    s3_client: &S3Client,
+    transfer_client: &TransferClient,
+    bucket: &str,
+    testnet: bool,
+) -> Result<()> {
     info!("update, testnet={}", testnet);
     let now = Utc::now();
     let schema = create_schema();
     let end_time = quantized_timestamp(now, UPDATE_QUANTIZATION);
     let mut join_set = JoinSet::new();
     for (exchange_id, symbols) in common_symbols() {
+        let s3_client = s3_client.clone();
         let transfer_client = transfer_client.clone();
         let bucket = bucket.to_string();
         let schema = schema.clone();
         join_set.spawn(async move {
             update_exchange(
+                &s3_client,
                 &transfer_client,
                 &bucket,
                 exchange_id,
@@ -60,6 +68,7 @@ fn create_schema() -> SchemaRef {
 }
 
 async fn update_exchange(
+    s3_client: &S3Client,
     transfer_client: &TransferClient,
     bucket: &str,
     exchange_id: ExchangeId,
@@ -91,6 +100,7 @@ async fn update_exchange(
         let candles_relative_file_path = candles_relative_file_path.clone();
         let schema = schema.clone();
         let semaphore = semaphore.clone();
+        let s3_client = s3_client.clone();
         let transfer_client = transfer_client.clone();
         join_set.spawn(async move {
             let _permit = semaphore.acquire_owned().await.unwrap();
@@ -98,6 +108,9 @@ async fn update_exchange(
                 "{}/{}/{}/{}",
                 exchange, symbol.base, symbol.quote, candles_relative_file_path
             );
+            if s3::has_file(&s3_client, &bucket, &candles_file_path).await {
+                return Ok(());
+            }
             let candles = connector
                 .get_klines(
                     symbol,
