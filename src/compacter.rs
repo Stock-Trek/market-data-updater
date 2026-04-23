@@ -67,8 +67,10 @@ async fn compact_folder(
         .collect::<Vec<_>>();
     if !missing.is_empty() {
         info!(
-            "{} has expected files {:?} but is missing {:?}",
-            prefix, expected_files, missing
+            "Compaction for {} is missing {}/{} files",
+            prefix,
+            missing.len(),
+            expected_files.len()
         );
         return Ok(());
     }
