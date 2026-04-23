@@ -14,7 +14,7 @@ use tracing::info;
 
 use crate::{
     constants::{KLINE_LIMIT, PARQUET_SUFFIX, UPDATE_QUANTIZATION, common_symbols},
-    quantized_time::quantized_timestamp,
+    quantized_time::{previous_top, quantized_timestamp},
     s3,
     subfolders::file_path,
 };
@@ -23,7 +23,7 @@ pub async fn update(transfer_client: &TransferClient, bucket: &str, testnet: boo
     info!("update, testnet={}", testnet);
     let now = Utc::now();
     let schema = create_schema();
-    let top = quantized_timestamp(now, UPDATE_QUANTIZATION);
+    let end_time = quantized_timestamp(now, UPDATE_QUANTIZATION);
     let mut join_set = JoinSet::new();
     for (exchange_id, symbols) in common_symbols() {
         let transfer_client = transfer_client.clone();
@@ -35,9 +35,8 @@ pub async fn update(transfer_client: &TransferClient, bucket: &str, testnet: boo
                 &bucket,
                 exchange_id,
                 symbols,
-                top,
                 &schema,
-                PARQUET_SUFFIX,
+                end_time,
                 testnet,
             )
             .await
@@ -65,19 +64,23 @@ async fn update_exchange(
     bucket: &str,
     exchange_id: ExchangeId,
     symbols: Vec<Symbol>,
-    top: DateTime<Utc>,
     schema: &SchemaRef,
-    suffix: &str,
+    end_time: DateTime<Utc>,
     testnet: bool,
 ) -> Result<()> {
-    info!("update exchange {:?} @ {}", exchange_id, top);
+    info!("update exchange {:?} @ end time {}", exchange_id, end_time);
     let connector = ConnectorFactory::create_public(exchange_id, testnet).await?;
-    let year = top.year();
-    let month = top.month() as i32;
-    let day = top.day() as i32;
-    let hour = top.hour() as i32;
-    let minute = top.minute() as i32;
-    let candles_relative_file_path = file_path(&[year, month, day, hour, minute], suffix);
+    let start_time = previous_top(end_time, UPDATE_QUANTIZATION);
+    let candles_relative_file_path = file_path(
+        &[
+            start_time.year(),
+            start_time.month() as i32,
+            start_time.day() as i32,
+            start_time.hour() as i32,
+            start_time.minute() as i32,
+        ],
+        PARQUET_SUFFIX,
+    );
     let exchange = exchange_id.as_str();
     let semaphore = Arc::new(Semaphore::new(10));
     let mut join_set = JoinSet::new();
@@ -96,7 +99,13 @@ async fn update_exchange(
                 exchange, symbol.base, symbol.quote, candles_relative_file_path
             );
             let candles = connector
-                .get_klines(symbol, "1m", KLINE_LIMIT, AccountType::Spot, None)
+                .get_klines(
+                    symbol,
+                    "1m",
+                    KLINE_LIMIT,
+                    AccountType::Spot,
+                    Some(end_time.timestamp_millis()),
+                )
                 .await?;
             let candles_bytes = candles_to_bytes(&candles, &schema)?;
             s3::upload_bytes(&transfer_client, &bucket, &candles_file_path, candles_bytes).await?;

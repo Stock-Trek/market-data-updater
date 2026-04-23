@@ -33,13 +33,13 @@ pub fn subfolders(numbers: &[i32]) -> Vec<String> {
     numbers.iter().map(|n| format!("{:02}/", n)).collect()
 }
 
-pub fn file_path(numbers: &[i32], prefix: &str) -> String {
+pub fn file_path(numbers: &[i32], suffix: &str) -> String {
     let raw_file_path = numbers
         .iter()
         .map(|n| format!("{:02}", n))
         .collect::<Vec<_>>()
         .join("/");
-    format!("{}{}", raw_file_path, prefix)
+    format!("{}{}", raw_file_path, suffix)
 }
 
 fn get_days_in_month(year: i32, month: u32) -> u32 {

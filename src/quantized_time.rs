@@ -11,6 +11,34 @@ pub fn quantized_timestamp(timestamp: DateTime<Utc>, quantization: Quantization)
     }
 }
 
+pub fn previous_top(top: DateTime<Utc>, quantization: Quantization) -> DateTime<Utc> {
+    match quantization {
+        Quantization::Minutes(top_of_minute) => top - Duration::minutes(top_of_minute as i64),
+        Quantization::Hour(top_of_hour) => top - Duration::hours(top_of_hour as i64),
+        Quantization::Day => top - Duration::days(1),
+        Quantization::Week(_) => top - Duration::weeks(1),
+        Quantization::Month(top_of_month) => {
+            let year = top.year();
+            let previous_month_raw = top.month() - top_of_month as u32;
+            let previous_year = if previous_month_raw < 1 {
+                year - 1
+            } else {
+                year
+            };
+            let previous_month = if previous_month_raw < 1 {
+                previous_month_raw + 12
+            } else {
+                previous_month_raw
+            };
+            top.with_year(previous_year)
+                .unwrap()
+                .with_month(previous_month)
+                .unwrap()
+        }
+        Quantization::Year => top.with_year(top.year() - 1).unwrap(),
+    }
+}
+
 fn quantized_minute(timestamp: DateTime<Utc>, top_of_minute: TopOfMinute) -> DateTime<Utc> {
     quantized_modulo_seconds(timestamp, (top_of_minute as i64) * 60)
 }
