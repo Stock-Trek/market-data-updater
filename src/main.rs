@@ -1,5 +1,7 @@
 use crate::{compacter::compact_all, constants::S3_BUCKET, s3::clients, updater::update};
 use anyhow::Result;
+use lambda_runtime::{Error, LambdaEvent, run, service_fn};
+use serde_json::{Value, json};
 use tracing_subscriber::{EnvFilter, fmt::Subscriber};
 
 mod compacter;
@@ -10,14 +12,18 @@ mod subfolders;
 mod updater;
 
 #[tokio::main]
-async fn main() -> Result<()> {
+async fn main() -> Result<(), Error> {
+    run(service_fn(function_handler)).await
+}
+
+async fn function_handler(event: LambdaEvent<Value>) -> Result<()> {
     setup_tracing()?;
     let (s3_client, transfer_client) = clients().await;
     let bucket = S3_BUCKET;
     let testnet = true;
     update(&s3_client, &transfer_client, bucket, testnet).await?;
     compact_all(&s3_client, &transfer_client, bucket).await?;
-    Ok(())
+    Ok(json!({ "status": "ok" }))
 }
 
 fn setup_tracing() -> Result<()> {
