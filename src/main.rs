@@ -1,5 +1,4 @@
 use crate::{compacter::compact_all, constants::S3_BUCKET, s3::clients, updater::update};
-use anyhow::Result;
 use lambda_runtime::{Error, LambdaEvent, run, service_fn};
 use serde_json::{Value, json};
 use tracing_subscriber::{EnvFilter, fmt::Subscriber};
@@ -16,7 +15,7 @@ async fn main() -> Result<(), Error> {
     run(service_fn(function_handler)).await
 }
 
-async fn function_handler(event: LambdaEvent<Value>) -> Result<()> {
+async fn function_handler(_event: LambdaEvent<Value>) -> Result<Value, Error> {
     setup_tracing()?;
     let (s3_client, transfer_client) = clients().await;
     let bucket = S3_BUCKET;
@@ -26,7 +25,7 @@ async fn function_handler(event: LambdaEvent<Value>) -> Result<()> {
     Ok(json!({ "status": "ok" }))
 }
 
-fn setup_tracing() -> Result<()> {
+fn setup_tracing() -> Result<(), Error> {
     let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
     let subscriber = Subscriber::builder()
         .with_ansi(false)
