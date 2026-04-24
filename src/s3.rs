@@ -1,4 +1,5 @@
 use anyhow::Result;
+use aws_config::BehaviorVersion;
 use aws_sdk_s3::{
     Client as S3Client,
     types::{Delete, ObjectIdentifier},
@@ -13,7 +14,7 @@ pub async fn clients() -> (S3Client, TransferClient) {
 }
 
 async fn s3_client() -> S3Client {
-    let config = aws_config::load_from_env().await;
+    let config = aws_config::load_defaults(BehaviorVersion::latest()).await;
     S3Client::new(&config)
 }
 
