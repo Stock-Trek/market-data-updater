@@ -7,7 +7,7 @@ pub fn get_subfolders_from_path(path: &str) -> anyhow::Result<Vec<String>> {
         0 | 1 | 2 | 3 | 4 => Ok(Vec::new()),
         5 => Ok(subfolders(&MONTHS)),
         6 => {
-            if let (Ok(year), Ok(month)) = (segments[3].parse::<i32>(), segments[4].parse::<u32>())
+            if let (Ok(year), Ok(month)) = (segments[4].parse::<i32>(), segments[5].parse::<u32>())
             {
                 let days_in_month = get_days_in_month(year, month);
                 let day_indexes: Vec<i32> = (1..=days_in_month).map(|d| d as i32).collect();
