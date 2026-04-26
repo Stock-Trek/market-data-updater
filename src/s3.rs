@@ -7,6 +7,7 @@ use aws_sdk_s3::{
 use aws_sdk_s3_transfer_manager::{Client as TransferClient, io::InputStream};
 use bytes::Bytes;
 use tokio::io::AsyncWriteExt;
+use tracing::info;
 
 pub async fn clients() -> (S3Client, TransferClient) {
     let (s3_client, transfer_client) = tokio::join!(s3_client(), transfer_client());
@@ -28,6 +29,7 @@ pub async fn has_file(
     bucket: &impl AsRef<str>,
     key: &impl AsRef<str>,
 ) -> bool {
+    info!("checking for file {}", key.as_ref());
     match s3_client
         .head_object()
         .bucket(bucket.as_ref())
@@ -60,6 +62,7 @@ pub async fn delete_files(
     bucket: &impl AsRef<str>,
     keys: &Vec<String>,
 ) -> Result<()> {
+    info!("delete files {:?}", keys);
     for chunk in keys.chunks(1000) {
         let objects = chunk
             .iter()
@@ -86,6 +89,7 @@ pub async fn download_bytes(
     bucket: &impl AsRef<str>,
     key: &impl AsRef<str>,
 ) -> Result<Bytes> {
+    info!("download bytes for key {}", key.as_ref());
     let mut handle = transfer_client
         .download()
         .bucket(bucket.as_ref())
@@ -106,6 +110,7 @@ pub async fn upload_bytes(
     key: &impl AsRef<str>,
     bytes: Bytes,
 ) -> Result<()> {
+    info!("upload bytes for key {}", key.as_ref());
     let stream = InputStream::from(bytes);
     transfer_client
         .upload()

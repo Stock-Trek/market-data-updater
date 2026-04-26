@@ -151,6 +151,7 @@ async fn download_batches(
         anyhow::bail!("No files provided");
     }
     let bucket_owned = bucket.to_string();
+    info!("download batches for key {}", &files[0]);
     let first_bytes = s3::download_bytes(transfer_client, &bucket_owned, &files[0]).await?;
     let mut first_reader = ParquetRecordBatchReader::try_new(first_bytes, 1024 * 1024)?;
     let schema = first_reader.next().unwrap()?.schema();
