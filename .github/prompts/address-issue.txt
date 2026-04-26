@@ -1,0 +1,3 @@
+Read the GitHub issue, comment and comment history.
+Address the issue.
+Output a concise high level summary of your actions that can be used in a pull request.

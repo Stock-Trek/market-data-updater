@@ -1,0 +1,4 @@
+Read the GitHub issue, comment and comment history.
+Classify the type of response we can respond with.
+Output exactly one of [ALREADY_ADDRESSED, REQUIRES_HUMAN, REQUIRES_MORE_INFORMATION, CAN_ADDRESS_FULLY].
+No explanations, introductions or conclusions, just a one word response.
