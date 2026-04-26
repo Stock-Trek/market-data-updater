@@ -1,6 +1,7 @@
 use crate::{compacter::compact_all, constants::S3_BUCKET, s3::clients, updater::update};
 use lambda_runtime::{Error, LambdaEvent, run, service_fn};
 use serde_json::{Value, json};
+use tracing::info;
 use tracing_subscriber::{EnvFilter, fmt::Subscriber};
 
 mod compacter;
@@ -17,6 +18,7 @@ async fn main() -> Result<(), Error> {
 }
 
 fn setup_tracing() -> Result<(), Error> {
+    info!("set up tracing");
     let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
     let subscriber = Subscriber::builder()
         .with_ansi(false)
@@ -27,6 +29,7 @@ fn setup_tracing() -> Result<(), Error> {
 }
 
 async fn function_handler(_event: LambdaEvent<Value>) -> Result<Value, Error> {
+    info!("get s3 and transfer clients");
     let (s3_client, transfer_client) = clients().await;
     let bucket = S3_BUCKET;
     let testnet = true;

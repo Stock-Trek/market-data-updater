@@ -104,9 +104,10 @@ async fn update_exchange(
         let transfer_client = transfer_client.clone();
         join_set.spawn(async move {
             let _permit = semaphore.acquire_owned().await.unwrap();
+            let test_real = if testnet { "test" } else { "real" };
             let candles_file_path = format!(
-                "{}/{}/{}/{}",
-                exchange, symbol.base, symbol.quote, candles_relative_file_path
+                "{}/{}/{}/{}/{}",
+                test_real, exchange, symbol.base, symbol.quote, candles_relative_file_path
             );
             if s3::has_file(&s3_client, &bucket, &candles_file_path).await {
                 return Ok(());

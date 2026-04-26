@@ -4,9 +4,9 @@ use anyhow::anyhow;
 pub fn get_subfolders_from_path(path: &str) -> anyhow::Result<Vec<String>> {
     let segments: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
     match segments.len() {
-        0 | 1 | 2 | 3 => Ok(Vec::new()),
-        4 => Ok(subfolders(&MONTHS)),
-        5 => {
+        0 | 1 | 2 | 3 | 4 => Ok(Vec::new()),
+        5 => Ok(subfolders(&MONTHS)),
+        6 => {
             if let (Ok(year), Ok(month)) = (segments[3].parse::<i32>(), segments[4].parse::<u32>())
             {
                 let days_in_month = get_days_in_month(year, month);
@@ -19,9 +19,9 @@ pub fn get_subfolders_from_path(path: &str) -> anyhow::Result<Vec<String>> {
                 )))
             }
         }
-        6 => Ok(subfolders(&HOURS)),
-        7 => Ok(subfolders(&MINUTES)),
-        8 => Ok(Vec::new()),
+        7 => Ok(subfolders(&HOURS)),
+        8 => Ok(subfolders(&MINUTES)),
+        9 => Ok(Vec::new()),
         _ => Err(anyhow!(format!(
             "Cannot get subfolders from path with too many delimiters {}",
             path
