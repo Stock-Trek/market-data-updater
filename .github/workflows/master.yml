@@ -23,11 +23,23 @@ jobs:
       - name: Build Lambda function
         run: cargo lambda build --release --output-format zip
 
+      - name: Get secrets
+        uses: Infisical/secrets-action@v1.0.16
+        with:
+          method: "oidc"
+          identity-id: "924edbf1-0c1f-409b-b948-da0322a3b737"
+          project-slug: "aws"
+          env-slug: "prod"
+
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v6
+        env:
+          AWS_ACCOUNT_ID: ${{ env.AWS_ACCOUNT_ID }}
+          AWS_REGION: ${{ env.AWS_REGION }}
+          AWS_ROLE_UPDATE_LAMBDA_MARKET_DATA: ${{ env.AWS_ROLE_UPDATE_LAMBDA_MARKET_DATA }}
         with:
-          aws-region: ${{ secrets.AWS_REGION }}
-          role-to-assume: "arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/${{ secrets.AWS_ROLE_UPDATE_LAMBDA }}"
+          aws-region: ${{ env.AWS_REGION }}
+          role-to-assume: "arn:aws:iam::${{ env.AWS_ACCOUNT_ID }}:role/${{ env.AWS_ROLE_UPDATE_LAMBDA_MARKET_DATA }}"
           role-session-name: "market-data-updater-${{ github.run_id }}"
           retry-max-attempts: 3
           mask-aws-account-id: true
