@@ -25,6 +25,10 @@ jobs:
       classify-request-base64: ${{ steps.prompts.outputs.classify-request-base64 }}
       classify-response-base64: ${{ steps.prompts.outputs.classify-response-base64 }}
       extra-information-required-base64: ${{ steps.prompts.outputs.extra-information-required-base64 }}
+      boolean-base64: ${{ steps.schemas.outputs.boolean-base64 }}
+      information-list-base64: ${{ steps.schemas.outputs.information-list-base64 }}
+      request-classification-base64: ${{ steps.schemas.outputs.request-classification-base64 }}
+      response-classification-base64: ${{ steps.schemas.outputs.response-classification-base64 }}
       issue-context-base64: ${{ steps.gather-context.outputs.context-base64 }}
       request-type: ${{ steps.save-request-type.outputs.request-type }}
     steps:
@@ -75,6 +79,14 @@ jobs:
           echo "classify-response-base64=$(cat .github/prompts/classify-response.txt | base64 -w 0)" >> $GITHUB_OUTPUT
           echo "extra-information-required-base64=$(cat .github/prompts/extra-information-required.txt | base64 -w 0)" >> $GITHUB_OUTPUT
 
+      - name: Save base64 schemas
+        id: schemas
+        run: |
+          echo "boolean-base64=$(cat .github/schemas/boolean.json | base64 -w 0)" >> $GITHUB_OUTPUT
+          echo "information-list-base64=$(cat .github/schemas/information-list.json | base64 -w 0)" >> $GITHUB_OUTPUT
+          echo "request-classification-base64=$(cat .github/schemas/request-classification.json | base64 -w 0)" >> $GITHUB_OUTPUT
+          echo "response-classification-base64=$(cat .github/schemas/response-classification.json | base64 -w 0)" >> $GITHUB_OUTPUT
+
       - name: Get last 50 comments
         id: gather-context
         uses: actions/github-script@v9
@@ -116,10 +128,11 @@ jobs:
 
       - name: Classify request
         id: classify-request
-        uses: ./.github/actions/invoke-pi
+        uses: ./.github/actions/question-pi
         with:
           context-base64: ${{ steps.gather-context.outputs.context-base64 }}
           prompt-base64: ${{ steps.prompts.outputs.classify-request-base64 }}
+          schema-base64: ${{ steps.schemas.outputs.request-classification-base64 }}
 
       - name: Save request type
         id: save-request-type
@@ -268,10 +281,11 @@ jobs:
 
       - name: Classify response
         id: classify-response
-        uses: ./.github/actions/invoke-pi
+        uses: ./.github/actions/question-pi
         with:
           context-base64: ${{ needs.triage.outputs.issue-context-base64 }}
           prompt-base64: ${{ needs.triage.outputs.classify-response-base64 }}
+          schema-base64: ${{ needs.triage.outputs.response-classification-base64 }}
       - name: Save response type
         id: save-response-type
         run: |
@@ -282,10 +296,11 @@ jobs:
       - name: Classify code changes required
         id: classify-are-code-changes-required
         if: steps.save-response-type.outputs.response-type == 'CAN_ADDRESS_FULLY'
-        uses: ./.github/actions/invoke-pi
+        uses: ./.github/actions/question-pi
         with:
           context-base64: ${{ needs.triage.outputs.issue-context-base64 }}
           prompt-base64: ${{ needs.triage.outputs.are-code-changes-required-base64 }}
+          schema-base64: ${{ needs.triage.outputs.boolean-base64 }}
       - name: Save code changes required
         id: save-are-code-changes-required
         if: steps.save-response-type.outputs.response-type == 'CAN_ADDRESS_FULLY'
@@ -297,10 +312,11 @@ jobs:
       - name: Classify extra information required
         id: classify-extra-information-required
         if: steps.save-response-type.outputs.response-type == 'REQUIRES_MORE_INFORMATION'
-        uses: ./.github/actions/invoke-pi
+        uses: ./.github/actions/question-pi
         with:
           context-base64: ${{ needs.triage.outputs.issue-context-base64 }}
           prompt-base64: ${{ needs.triage.outputs.extra-information-required-base64 }}
+          schema-base64: ${{ needs.triage.outputs.information-list-base64 }}
       - name: Save extra information required
         id: save-extra-information-required
         if: steps.save-response-type.outputs.response-type == 'REQUIRES_MORE_INFORMATION'
