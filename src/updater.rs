@@ -5,11 +5,22 @@ use aws_sdk_s3::Client as S3Client;
 use aws_sdk_s3_transfer_manager::Client as TransferClient;
 use bytes::Bytes;
 use chrono::{DateTime, Datelike, Timelike, Utc};
+use exchange_gateway::clients::reqwest::ReqwestHttpClient;
+use exchange_gateway::prelude::{Connector, SubmissionOutcome, TradingMode};
+use exchange_types::binance::exchange::BinanceExchange;
+use exchange_types::binance::klines::{BinanceKlinesInterval, BinanceKlinesRequest};
+use exchange_types::binance::klines_limit::BinanceKlinesLimit;
+use exchange_types::encode::ByteEncoder;
+use exchange_types::klines::{Kline, KlinesResponse};
+use exchange_types::new_types::Milliseconds;
+use exchange_types::signer::Signer;
 use parquet::arrow::ArrowWriter;
 use std::sync::Arc;
+use std::time::Duration;
 use stock_trek_types::cex::{cex_id::CexId, trading_pair::TradingPair};
 use tokio::{sync::Semaphore, task::JoinSet};
 use tracing::info;
+use type_bridge::{BinanceConverter, Converter};
 
 use crate::{
     constants::{KLINE_LIMIT, PARQUET_SUFFIX, TestReal, UPDATE_QUANTIZATION, common_symbols},
@@ -17,6 +28,11 @@ use crate::{
     s3,
     subfolders::file_path,
 };
+
+type BinanceConnector = Connector<BinanceExchange, ReqwestHttpClient>;
+
+const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
+const MAX_RETRIES: u8 = 3;
 
 pub async fn update(
     s3_client: &S3Client,
@@ -66,6 +82,23 @@ fn create_schema() -> SchemaRef {
     ]))
 }
 
+fn create_binance_connector(testnet: bool) -> Result<BinanceConnector> {
+    let trading_mode = if testnet {
+        TradingMode::Paper
+    } else {
+        TradingMode::Real
+    };
+    let signer = Signer::new_unencrypted(ByteEncoder::HexLower);
+    let connector = Connector::try_new_http_reqwest(
+        trading_mode,
+        BinanceExchange,
+        signer,
+        REQUEST_TIMEOUT,
+        MAX_RETRIES,
+    )?;
+    Ok(connector)
+}
+
 async fn update_exchange(
     s3_client: &S3Client,
     transfer_client: &TransferClient,
@@ -77,8 +110,16 @@ async fn update_exchange(
     end_time: DateTime<Utc>,
 ) -> Result<()> {
     info!("update exchange {:?} @ end time {}", cex_id, end_time);
+    match cex_id {
+        CexId::Binance => {}
+        other => anyhow::bail!("unsupported exchange: {other:?}"),
+    }
     let testnet = test_real.into();
-    let connector = ConnectorFactory::create_public(cex_id, testnet).await?;
+    let connector = Arc::new(create_binance_connector(testnet)?);
+    let converter = BinanceConverter::default();
+    let klines_limit = KLINE_LIMIT
+        .map(|limit| BinanceKlinesLimit::try_new(u32::from(limit)))
+        .transpose()?;
     let start_time = previous_top(end_time, UPDATE_QUANTIZATION);
     let candles_relative_file_path = file_path(
         &[
@@ -95,7 +136,12 @@ async fn update_exchange(
     let mut join_set = JoinSet::new();
     for trading_pair in trading_pairs {
         info!("update symbol {:?}", trading_pair);
+        let symbol = converter
+            .ticker_mapping()
+            .symbol(&trading_pair)
+            .ok_or_else(|| anyhow::anyhow!("no Binance symbol for {trading_pair:?}"))?;
         let connector = connector.clone();
+        let exchange = exchange.clone();
         let bucket = bucket.to_string();
         let candles_relative_file_path = candles_relative_file_path.clone();
         let schema = schema.clone();
@@ -115,15 +161,10 @@ async fn update_exchange(
             if s3::has_file(&s3_client, &bucket, &candles_file_path).await {
                 return Ok(());
             }
-            let candles = connector
-                .get_klines(
-                    trading_pair,
-                    "1m",
-                    KLINE_LIMIT,
-                    AccountType::Spot,
-                    Some(end_time.timestamp_millis()),
-                )
-                .await?;
+            let mut request = BinanceKlinesRequest::new(symbol, BinanceKlinesInterval::ONE_MINUTE);
+            request.endTime = Some(Milliseconds(end_time.timestamp_millis()));
+            request.limit = klines_limit;
+            let candles = get_klines(&connector, request).await?;
             let candles_bytes = candles_to_bytes(&candles, &schema)?;
             s3::upload_bytes(&transfer_client, &bucket, &candles_file_path, candles_bytes).await?;
             Ok::<_, anyhow::Error>(())
@@ -135,14 +176,37 @@ async fn update_exchange(
     Ok(())
 }
 
+async fn get_klines(
+    connector: &BinanceConnector,
+    request: BinanceKlinesRequest,
+) -> Result<Vec<Kline>> {
+    let submission = connector.submit_http(request)?;
+    match submission.wait().await? {
+        SubmissionOutcome::Submitted(response) => Ok(response.klines()?),
+        SubmissionOutcome::Unknown { .. } => {
+            anyhow::bail!("unknown Binance klines submission outcome")
+        }
+    }
+}
+
 fn candles_to_bytes(candles: &[Kline], schema: &SchemaRef) -> Result<Bytes> {
     let columns: Vec<ArrayRef> = vec![
-        Arc::new(Int64Array::from_iter(candles.iter().map(|k| k.open_time))),
-        Arc::new(Float64Array::from_iter(candles.iter().map(|k| k.open))),
-        Arc::new(Float64Array::from_iter(candles.iter().map(|k| k.high))),
-        Arc::new(Float64Array::from_iter(candles.iter().map(|k| k.low))),
-        Arc::new(Float64Array::from_iter(candles.iter().map(|k| k.close))),
-        Arc::new(Float64Array::from_iter(candles.iter().map(|k| k.volume))),
+        Arc::new(Int64Array::from_iter(candles.iter().map(|k| k.open_time.0))),
+        Arc::new(Float64Array::from_iter(
+            candles.iter().map(|k| f64::try_from(k.open).ok()),
+        )),
+        Arc::new(Float64Array::from_iter(
+            candles.iter().map(|k| f64::try_from(k.high).ok()),
+        )),
+        Arc::new(Float64Array::from_iter(
+            candles.iter().map(|k| f64::try_from(k.low).ok()),
+        )),
+        Arc::new(Float64Array::from_iter(
+            candles.iter().map(|k| f64::try_from(k.close).ok()),
+        )),
+        Arc::new(Float64Array::from_iter(
+            candles.iter().map(|k| f64::try_from(k.volume).ok()),
+        )),
     ];
     let batch = RecordBatch::try_new(schema.clone(), columns)?;
     let mut buffer = Vec::new();
