@@ -5,11 +5,9 @@ use aws_sdk_s3::Client as S3Client;
 use aws_sdk_s3_transfer_manager::Client as TransferClient;
 use bytes::Bytes;
 use chrono::{DateTime, Datelike, Timelike, Utc};
-use digdigdig3::{
-    AccountType, ExchangeId, MarketData, Symbol, connector_manager::ConnectorFactory, core::Kline,
-};
 use parquet::arrow::ArrowWriter;
 use std::sync::Arc;
+use stock_trek_types::cex::{cex_id::CexId, trading_pair::TradingPair};
 use tokio::{sync::Semaphore, task::JoinSet};
 use tracing::info;
 
@@ -72,15 +70,15 @@ async fn update_exchange(
     s3_client: &S3Client,
     transfer_client: &TransferClient,
     bucket: &str,
-    exchange_id: ExchangeId,
+    cex_id: CexId,
     test_real: TestReal,
-    symbols: Vec<Symbol>,
+    trading_pairs: Vec<TradingPair>,
     schema: &SchemaRef,
     end_time: DateTime<Utc>,
 ) -> Result<()> {
-    info!("update exchange {:?} @ end time {}", exchange_id, end_time);
+    info!("update exchange {:?} @ end time {}", cex_id, end_time);
     let testnet = test_real.into();
-    let connector = ConnectorFactory::create_public(exchange_id, testnet).await?;
+    let connector = ConnectorFactory::create_public(cex_id, testnet).await?;
     let start_time = previous_top(end_time, UPDATE_QUANTIZATION);
     let candles_relative_file_path = file_path(
         &[
@@ -92,11 +90,11 @@ async fn update_exchange(
         ],
         PARQUET_SUFFIX,
     );
-    let exchange = exchange_id.as_str();
+    let exchange = cex_id.to_string();
     let semaphore = Arc::new(Semaphore::new(10));
     let mut join_set = JoinSet::new();
-    for symbol in symbols {
-        info!("update symbol {}", symbol);
+    for trading_pair in trading_pairs {
+        info!("update symbol {:?}", trading_pair);
         let connector = connector.clone();
         let bucket = bucket.to_string();
         let candles_relative_file_path = candles_relative_file_path.clone();
@@ -108,14 +106,18 @@ async fn update_exchange(
             let _permit = semaphore.acquire_owned().await.unwrap();
             let candles_file_path = format!(
                 "{}/{}/{}/{}/{}",
-                test_real, exchange, symbol.base, symbol.quote, candles_relative_file_path
+                test_real,
+                exchange,
+                trading_pair.base,
+                trading_pair.quote,
+                candles_relative_file_path
             );
             if s3::has_file(&s3_client, &bucket, &candles_file_path).await {
                 return Ok(());
             }
             let candles = connector
                 .get_klines(
-                    symbol,
+                    trading_pair,
                     "1m",
                     KLINE_LIMIT,
                     AccountType::Spot,
