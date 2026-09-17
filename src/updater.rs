@@ -15,6 +15,7 @@ use chrono::{DateTime, Datelike, Timelike, Utc};
 use exchange_types::{klines::Kline, urls::TradingMode};
 use parquet::arrow::ArrowWriter;
 use std::sync::Arc;
+use std::time::SystemTime;
 use stock_trek_types::cex::{cex_id::CexId, trading_pair::TradingPair};
 use tokio::{sync::Semaphore, task::JoinSet};
 use tracing::info;
@@ -36,7 +37,7 @@ impl KlinesUpdater {
         bucket: &str,
     ) -> Result<()> {
         info!("update");
-        let now = Utc::now();
+        let now = SystemTime::now();
         let schema = Self::create_schema();
         let end_time = QuantizedTime::timestamp(now, UPDATE_QUANTIZATION);
         let mut join_set = JoinSet::new();
@@ -80,11 +81,13 @@ impl KlinesUpdater {
         trading_mode: TradingMode,
         trading_pairs: Vec<TradingPair>,
         schema: &SchemaRef,
-        end_time: DateTime<Utc>,
+        end_time: SystemTime,
         updater: Arc<dyn ExchangeUpdater>,
     ) -> Result<()> {
-        info!("update exchange {:?} @ end time {}", cex_id, end_time);
         let start_time = QuantizedTime::previous_top(end_time, UPDATE_QUANTIZATION);
+        let start_time: DateTime<Utc> = start_time.into();
+        let end_time: DateTime<Utc> = end_time.into();
+        info!("update exchange {:?} @ end time {}", cex_id, end_time);
         let candles_relative_file_path = SubFolders::file_path(
             &[
                 start_time.year(),
