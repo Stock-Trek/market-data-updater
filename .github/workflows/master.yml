@@ -20,9 +20,6 @@ jobs:
       - name: Install Cargo Lambda via pip
         run: pip install cargo-lambda
 
-      - name: Build Lambda function
-        run: cargo lambda build --release --output-format zip
-
       - name: Get secrets
         uses: Infisical/secrets-action@v1.0.16
         with:
@@ -30,6 +27,21 @@ jobs:
           identity-id: "924edbf1-0c1f-409b-b948-da0322a3b737"
           project-slug: "aws"
           env-slug: "prod"
+
+      - name: Set up shipyard ssh auth
+        env:
+          SHIPYARD_KNOWN_HOST: ${{ env.SHIPYARD_KNOWN_HOST }}
+          SHIPYARD_SSH_PRIVATE_KEY_CLIENT: ${{ env.SHIPYARD_SSH_PRIVATE_KEY_CLIENT }}
+        run: |
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          printf '%s\n' "${{ env.SHIPYARD_SSH_PRIVATE_KEY_CLIENT }}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          echo "${{ env.SHIPYARD_KNOWN_HOST }}" >> ~/.ssh/known_hosts
+          ssh -T git@ssh.shipyard.rs
+
+      - name: Build Lambda function
+        run: cargo lambda build --release --output-format zip
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v6
