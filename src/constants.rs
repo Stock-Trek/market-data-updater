@@ -13,7 +13,7 @@ pub const MINUTES: [i32; 10] = [0, 6, 12, 18, 24, 30, 36, 42, 48, 54];
 pub const HOURS: [i32; 6] = [0, 4, 8, 12, 16, 20];
 pub const MONTHS: [i32; 4] = [0, 3, 6, 9];
 
-const COMMON_SYMBOLS: &[(TradingMode, CexId, AssetId, AssetId)] = &[
+const COMMON_TRADING_PAIRS: &[(TradingMode, CexId, AssetId, AssetId)] = &[
     (
         TradingMode::Paper,
         CexId::Binance,
@@ -34,13 +34,13 @@ const COMMON_SYMBOLS: &[(TradingMode, CexId, AssetId, AssetId)] = &[
     ),
 ];
 
-pub fn common_symbols() -> HashMap<(CexId, TradingMode), Vec<TradingPair>> {
+pub fn common_trading_pairs() -> HashMap<(CexId, TradingMode), Vec<TradingPair>> {
     let mut map = HashMap::new();
-    for (trading_mode, cex_id, base, quote) in COMMON_SYMBOLS {
+    for (trading_mode, cex_id, base, quote) in COMMON_TRADING_PAIRS {
         let key = (*cex_id, *trading_mode);
-        let symbol = TradingPair::new(*base, *quote);
+        let trading_pair = TradingPair::new(*base, *quote);
         let vec = map.entry(key).or_insert(Vec::new());
-        vec.push(symbol);
+        vec.push(trading_pair);
     }
     map
 }

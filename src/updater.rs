@@ -1,8 +1,9 @@
 use crate::{
-    constants::{KLINE_LIMIT, PARQUET_SUFFIX, UPDATE_QUANTIZATION, common_symbols},
+    constants::{PARQUET_SUFFIX, UPDATE_QUANTIZATION, common_trading_pairs},
     quantized_time::QuantizedTime,
     s3::S3,
     subfolders::SubFolders,
+    updaters::{binance_updater::BinanceUpdater, exchange_updater::ExchangeUpdater},
 };
 use anyhow::Result;
 use arrow_array::{ArrayRef, Float64Array, Int64Array, RecordBatch};
@@ -11,37 +12,25 @@ use aws_sdk_s3::Client as S3Client;
 use aws_sdk_s3_transfer_manager::Client as TransferClient;
 use bytes::Bytes;
 use chrono::{DateTime, Datelike, Timelike, Utc};
-use exchange_gateway::{
-    clients::reqwest::ReqwestHttpClient, connector::Connector, submission::SubmissionOutcome,
-};
-use exchange_types::{
-    binance::{
-        exchange::BinanceExchange,
-        klines::{BinanceKlinesInterval, BinanceKlinesRequest},
-        klines_limit::BinanceKlinesLimit,
-    },
-    encode::ByteEncoder,
-    klines::{Kline, KlinesResponse},
-    new_types::Milliseconds,
-    signer::Signer,
-    urls::TradingMode,
-};
+use exchange_types::{klines::Kline, urls::TradingMode};
 use parquet::arrow::ArrowWriter;
-use std::{sync::Arc, time::Duration};
+use std::sync::Arc;
 use stock_trek_types::cex::{cex_id::CexId, trading_pair::TradingPair};
 use tokio::{sync::Semaphore, task::JoinSet};
 use tracing::info;
-use type_bridge::{BinanceConverter, Converter};
 
-type BinanceConnector = Connector<BinanceExchange, ReqwestHttpClient>;
-
-const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
-const MAX_RETRIES: u8 = 3;
-
-pub struct KlinesUpdater;
+pub struct KlinesUpdater {
+    binance: Arc<BinanceUpdater>,
+}
 
 impl KlinesUpdater {
+    pub fn try_new(trading_mode: TradingMode) -> Result<Self> {
+        let binance = Arc::new(BinanceUpdater::try_new(trading_mode)?);
+        Ok(Self { binance })
+    }
+
     pub async fn update(
+        &self,
         s3_client: &S3Client,
         transfer_client: &TransferClient,
         bucket: &str,
@@ -51,25 +40,92 @@ impl KlinesUpdater {
         let schema = Self::create_schema();
         let end_time = QuantizedTime::timestamp(now, UPDATE_QUANTIZATION);
         let mut join_set = JoinSet::new();
-        for (exchange_id_test_real, symbols) in common_symbols() {
+        for (cex_id_trading_mode, trading_pairs) in common_trading_pairs() {
             let s3_client = s3_client.clone();
             let transfer_client = transfer_client.clone();
             let bucket = bucket.to_string();
-            let exchange_id = exchange_id_test_real.0;
-            let test_real = exchange_id_test_real.1;
+            let cex_id = cex_id_trading_mode.0;
+            let trading_mode = cex_id_trading_mode.1;
             let schema = schema.clone();
+            let updater = match cex_id {
+                CexId::Binance => self.binance.clone(),
+                other => anyhow::bail!("Unsupported exchange: {other:?}"),
+            };
             join_set.spawn(async move {
                 Self::update_exchange(
                     &s3_client,
                     &transfer_client,
                     &bucket,
-                    exchange_id,
-                    test_real,
-                    symbols,
+                    cex_id,
+                    trading_mode,
+                    trading_pairs,
                     &schema,
                     end_time,
+                    updater.clone(),
                 )
                 .await
+            });
+        }
+        while let Some(result) = join_set.join_next().await {
+            result??;
+        }
+        Ok(())
+    }
+
+    async fn update_exchange(
+        s3_client: &S3Client,
+        transfer_client: &TransferClient,
+        bucket: &str,
+        cex_id: CexId,
+        trading_mode: TradingMode,
+        trading_pairs: Vec<TradingPair>,
+        schema: &SchemaRef,
+        end_time: DateTime<Utc>,
+        updater: Arc<dyn ExchangeUpdater>,
+    ) -> Result<()> {
+        info!("update exchange {:?} @ end time {}", cex_id, end_time);
+        let start_time = QuantizedTime::previous_top(end_time, UPDATE_QUANTIZATION);
+        let candles_relative_file_path = SubFolders::file_path(
+            &[
+                start_time.year(),
+                start_time.month() as i32,
+                start_time.day() as i32,
+                start_time.hour() as i32,
+                start_time.minute() as i32,
+            ],
+            PARQUET_SUFFIX,
+        );
+        let semaphore = Arc::new(Semaphore::new(10));
+        let mut join_set = JoinSet::new();
+        for trading_pair in trading_pairs {
+            info!("update symbol {:?}", trading_pair);
+            let bucket = bucket.to_string();
+            let candles_relative_file_path = candles_relative_file_path.clone();
+            let schema = schema.clone();
+            let semaphore = semaphore.clone();
+            let s3_client = s3_client.clone();
+            let transfer_client = transfer_client.clone();
+            let updater_clone = updater.clone();
+            join_set.spawn(async move {
+                let _permit = semaphore.acquire_owned().await.unwrap();
+                let candles_file_path = format!(
+                    "{}/{}/{}/{}/{}",
+                    trading_mode,
+                    cex_id,
+                    trading_pair.base,
+                    trading_pair.quote,
+                    candles_relative_file_path
+                );
+                if S3::has_file(&s3_client, &bucket, &candles_file_path).await {
+                    return Ok(());
+                }
+                let candles = updater_clone
+                    .klines(&trading_pair, start_time, end_time)
+                    .await?;
+                let candles_bytes = Self::candles_to_bytes(&candles, &schema)?;
+                S3::upload_bytes(&transfer_client, &bucket, &candles_file_path, candles_bytes)
+                    .await?;
+                Ok::<_, anyhow::Error>(())
             });
         }
         while let Some(result) = join_set.join_next().await {
@@ -87,109 +143,6 @@ impl KlinesUpdater {
             Field::new("close", DataType::Float64, true),
             Field::new("volume", DataType::Float64, true),
         ]))
-    }
-
-    fn create_binance_connector(trading_mode: TradingMode) -> Result<BinanceConnector> {
-        let signer = Signer::new_unencrypted(ByteEncoder::HexLower);
-        let connector = Connector::try_new_http_reqwest(
-            trading_mode,
-            BinanceExchange,
-            signer,
-            REQUEST_TIMEOUT,
-            MAX_RETRIES,
-        )?;
-        Ok(connector)
-    }
-
-    async fn update_exchange(
-        s3_client: &S3Client,
-        transfer_client: &TransferClient,
-        bucket: &str,
-        cex_id: CexId,
-        trading_mode: TradingMode,
-        trading_pairs: Vec<TradingPair>,
-        schema: &SchemaRef,
-        end_time: DateTime<Utc>,
-    ) -> Result<()> {
-        info!("update exchange {:?} @ end time {}", cex_id, end_time);
-        match cex_id {
-            CexId::Binance => {}
-            other => anyhow::bail!("unsupported exchange: {other:?}"),
-        }
-        let binance_connector = Arc::new(Self::create_binance_connector(trading_mode)?);
-        let converter = BinanceConverter::default();
-        let klines_limit = KLINE_LIMIT
-            .map(|limit| BinanceKlinesLimit::try_new(u32::from(limit)))
-            .transpose()?;
-        let start_time = QuantizedTime::previous_top(end_time, UPDATE_QUANTIZATION);
-        let candles_relative_file_path = SubFolders::file_path(
-            &[
-                start_time.year(),
-                start_time.month() as i32,
-                start_time.day() as i32,
-                start_time.hour() as i32,
-                start_time.minute() as i32,
-            ],
-            PARQUET_SUFFIX,
-        );
-        let exchange = cex_id.to_string();
-        let semaphore = Arc::new(Semaphore::new(10));
-        let mut join_set = JoinSet::new();
-        for trading_pair in trading_pairs {
-            info!("update symbol {:?}", trading_pair);
-            let symbol = converter
-                .ticker_mapping()
-                .symbol(&trading_pair)
-                .ok_or_else(|| anyhow::anyhow!("no Binance symbol for {trading_pair:?}"))?;
-            let connector = binance_connector.clone();
-            let exchange = exchange.clone();
-            let bucket = bucket.to_string();
-            let candles_relative_file_path = candles_relative_file_path.clone();
-            let schema = schema.clone();
-            let semaphore = semaphore.clone();
-            let s3_client = s3_client.clone();
-            let transfer_client = transfer_client.clone();
-            join_set.spawn(async move {
-                let _permit = semaphore.acquire_owned().await.unwrap();
-                let candles_file_path = format!(
-                    "{}/{}/{}/{}/{}",
-                    trading_mode,
-                    exchange,
-                    trading_pair.base,
-                    trading_pair.quote,
-                    candles_relative_file_path
-                );
-                if S3::has_file(&s3_client, &bucket, &candles_file_path).await {
-                    return Ok(());
-                }
-                let mut request =
-                    BinanceKlinesRequest::new(symbol, BinanceKlinesInterval::ONE_MINUTE);
-                request.endTime = Some(Milliseconds(end_time.timestamp_millis()));
-                request.limit = klines_limit;
-                let candles = Self::get_klines(&connector, request).await?;
-                let candles_bytes = Self::candles_to_bytes(&candles, &schema)?;
-                S3::upload_bytes(&transfer_client, &bucket, &candles_file_path, candles_bytes)
-                    .await?;
-                Ok::<_, anyhow::Error>(())
-            });
-        }
-        while let Some(result) = join_set.join_next().await {
-            result??;
-        }
-        Ok(())
-    }
-
-    async fn get_klines(
-        connector: &BinanceConnector,
-        request: BinanceKlinesRequest,
-    ) -> Result<Vec<Kline>> {
-        let submission = connector.submit_http(request)?;
-        match submission.wait().await? {
-            SubmissionOutcome::Submitted(response) => Ok(response.klines()?),
-            SubmissionOutcome::Unknown { .. } => {
-                anyhow::bail!("unknown Binance klines submission outcome")
-            }
-        }
     }
 
     fn candles_to_bytes(candles: &[Kline], schema: &SchemaRef) -> Result<Bytes> {
