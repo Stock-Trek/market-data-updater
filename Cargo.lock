@@ -921,6 +921,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2af50177e190e07a26ab74f8b1efbfe2ef87da2116221318cb1c2e82baf7de06"
 
 [[package]]
+name = "bimap"
+version = "0.6.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "230c5f1ca6a325a32553f8640d31ac9b49f2411e901e427570154868b46da4f7"
+
+[[package]]
 name = "bitflags"
 version = "1.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1518,7 +1524,7 @@ source = "registry+ssh://git@ssh.shipyard.rs/stock-trek/crate-index.git"
 checksum = "44c1482786454da4dd65c8347aecefa3d525e88eb81516de534c3f9b169750e0"
 dependencies = [
  "async-trait",
- "exchange-types",
+ "exchange-types 0.13.1",
  "futures-timer",
  "httpdate",
  "iris",
@@ -1534,9 +1540,33 @@ dependencies = [
 
 [[package]]
 name = "exchange-types"
-version = "0.13.0"
+version = "0.12.4"
 source = "registry+ssh://git@ssh.shipyard.rs/stock-trek/crate-index.git"
-checksum = "d0e2d2127332a95228620195a7334599e0d11d513a0787852d021b048696ae3f"
+checksum = "8c6259e76fc319012171d7ab2adf2c671e06b053e44ee9cdfce697a4c7057609"
+dependencies = [
+ "bs58",
+ "data-encoding",
+ "ed25519-compact",
+ "hmac 0.12.1",
+ "p256",
+ "p384",
+ "query-params",
+ "rsa",
+ "rust_decimal",
+ "secrecy",
+ "serde",
+ "serde_json",
+ "serde_with",
+ "sha2 0.10.9",
+ "strum",
+ "thiserror",
+]
+
+[[package]]
+name = "exchange-types"
+version = "0.13.1"
+source = "registry+ssh://git@ssh.shipyard.rs/stock-trek/crate-index.git"
+checksum = "affecc639dbe7e243985f4d46e9ab987706e6fc8eb99d5e9cfdf311abbbecdf7"
 dependencies = [
  "bs58",
  "data-encoding",
@@ -2603,6 +2633,7 @@ dependencies = [
  "bytes",
  "chrono",
  "exchange-gateway",
+ "exchange-types 0.13.1",
  "hashbrown 0.17.1",
  "lambda_runtime",
  "parquet",
@@ -2611,6 +2642,7 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
+ "type-bridge",
 ]
 
 [[package]]
@@ -4267,6 +4299,23 @@ name = "twox-hash"
 version = "2.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5283634e518fe9e82c7b20520bb4bc209009fd16c82077c802f8111ecbb0117a"
+
+[[package]]
+name = "type-bridge"
+version = "0.6.1"
+source = "registry+ssh://git@ssh.shipyard.rs/stock-trek/crate-index.git"
+checksum = "15cd0145076f5a1ddb8446bfe209b6008c9b4a3778aa2029eacddf69ce777109"
+dependencies = [
+ "bimap",
+ "exchange-types 0.12.4",
+ "hashbrown 0.17.1",
+ "rust_decimal",
+ "serde",
+ "serde_with",
+ "stock-trek-types",
+ "thiserror",
+ "uuid",
+]
 
 [[package]]
 name = "typenum"

@@ -14,11 +14,13 @@ aws-sdk-s3-transfer-manager = "0.2.0"
 bytes = "1.11.1"
 chrono = "0.4.44"
 exchange-gateway = { version = "0.12.4", registry = "shipyard" }
+exchange-types = { version = "0.13.1", registry = "shipyard" }
 hashbrown = "0.17.1"
 lambda_runtime = "1.1.3"
 parquet = "60.0.0"
 serde_json = "1.0.149"
 stock-trek-types = "0.4.2"
+type-bridge = { version = "0.6.1", registry = "shipyard" }
 tokio = "1.52.1"
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
