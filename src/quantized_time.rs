@@ -71,18 +71,10 @@ impl QuantizedTime {
             Quantization::Day => top - Duration::days(1),
             Quantization::Week(_) => top - Duration::weeks(1),
             Quantization::Month(top_of_month) => {
-                let year = top.year();
-                let previous_month_raw = top.month() - top_of_month as u32;
-                let previous_year = if previous_month_raw < 1 {
-                    year - 1
-                } else {
-                    year
-                };
-                let previous_month = if previous_month_raw < 1 {
-                    previous_month_raw + 12
-                } else {
-                    previous_month_raw
-                };
+                let total_months =
+                    top.year() as i64 * 12 + top.month0() as i64 - top_of_month as i64;
+                let previous_year = total_months.div_euclid(12) as i32;
+                let previous_month = total_months.rem_euclid(12) as u32 + 1;
                 top.with_year(previous_year)
                     .unwrap()
                     .with_month(previous_month)
@@ -115,7 +107,7 @@ impl QuantizedTime {
     }
     fn month(timestamp: DateTime<Utc>, top_of_month: TopOfMonth) -> DateTime<Utc> {
         let year = timestamp.year();
-        let month = top_of_month as u32 + 1;
+        let month = timestamp.month0() / top_of_month as u32 * top_of_month as u32 + 1;
         Utc.with_ymd_and_hms(year, month, 1, 0, 0, 0).unwrap()
     }
     fn year(timestamp: DateTime<Utc>) -> DateTime<Utc> {
@@ -124,7 +116,7 @@ impl QuantizedTime {
     }
     fn modulo_seconds(timestamp: DateTime<Utc>, modulo: i64) -> DateTime<Utc> {
         let timestamp_secs = timestamp.timestamp();
-        let quantized_secs = timestamp_secs - (timestamp_secs % modulo);
+        let quantized_secs = timestamp_secs - timestamp_secs.rem_euclid(modulo);
         Utc.timestamp_opt(quantized_secs, 0).unwrap()
     }
 }
