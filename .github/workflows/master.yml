@@ -20,7 +20,7 @@ jobs:
       - name: Install Cargo Lambda via pip
         run: pip install cargo-lambda
 
-      - name: Get secrets
+      - name: Get build secrets
         uses: Infisical/secrets-action@v1.0.16
         with:
           method: "oidc"
@@ -41,6 +41,14 @@ jobs:
 
       - name: Build Lambda function
         run: cargo lambda build --release --output-format zip
+
+      - name: Get aws secrets
+        uses: Infisical/secrets-action@v1.0.16
+        with:
+          method: "oidc"
+          identity-id: "924edbf1-0c1f-409b-b948-da0322a3b737"
+          project-slug: "aws"
+          env-slug: "prod"
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v6

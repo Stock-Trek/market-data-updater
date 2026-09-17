@@ -1,6 +1,6 @@
 [package]
 name = "market-data-updater"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 
 [dependencies]
@@ -13,7 +13,7 @@ aws-sdk-s3 = "1.130.0"
 aws-sdk-s3-transfer-manager = "0.2.0"
 bytes = "1.11.1"
 chrono = "0.4.44"
-exchange-gateway = { version = "0.12.4", registry = "shipyard" }
+exchange-gateway = { version = "0.12.5", registry = "shipyard" }
 exchange-types = { version = "0.13.1", registry = "shipyard" }
 hashbrown = "0.17.1"
 lambda_runtime = "1.1.3"
