@@ -20,7 +20,7 @@ lambda_runtime = "1.1.3"
 parquet = "60.0.0"
 serde_json = "1.0.149"
 stock-trek-types = "0.4.2"
-type-bridge = { version = "0.6.1", registry = "shipyard" }
+type-bridge = { version = "0.6.2", registry = "shipyard" }
 tokio = "1.52.1"
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }

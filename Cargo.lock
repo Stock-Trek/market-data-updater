@@ -1514,7 +1514,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -1524,7 +1524,7 @@ source = "registry+ssh://git@ssh.shipyard.rs/stock-trek/crate-index.git"
 checksum = "a7f479db502e2e31d31976fae54f6a52cca4e2fe204dd83d5e01047c293f755c"
 dependencies = [
  "async-trait",
- "exchange-types 0.13.1",
+ "exchange-types",
  "futures-timer",
  "httpdate",
  "iris",
@@ -1536,30 +1536,6 @@ dependencies = [
  "tokio",
  "tracing",
  "uuid",
-]
-
-[[package]]
-name = "exchange-types"
-version = "0.12.4"
-source = "registry+ssh://git@ssh.shipyard.rs/stock-trek/crate-index.git"
-checksum = "8c6259e76fc319012171d7ab2adf2c671e06b053e44ee9cdfce697a4c7057609"
-dependencies = [
- "bs58",
- "data-encoding",
- "ed25519-compact",
- "hmac 0.12.1",
- "p256",
- "p384",
- "query-params",
- "rsa",
- "rust_decimal",
- "secrecy",
- "serde",
- "serde_json",
- "serde_with",
- "sha2 0.10.9",
- "strum",
- "thiserror",
 ]
 
 [[package]]
@@ -2168,7 +2144,7 @@ dependencies = [
  "libc",
  "percent-encoding",
  "pin-project-lite",
- "socket2 0.6.5",
+ "socket2 0.5.10",
  "tokio",
  "tower-service",
  "tracing",
@@ -2633,7 +2609,7 @@ dependencies = [
  "bytes",
  "chrono",
  "exchange-gateway",
- "exchange-types 0.13.1",
+ "exchange-types",
  "hashbrown 0.17.1",
  "lambda_runtime",
  "parquet",
@@ -2735,7 +2711,7 @@ version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -3078,7 +3054,7 @@ dependencies = [
  "quinn-udp",
  "rustc-hash",
  "rustls 0.23.45",
- "socket2 0.6.5",
+ "socket2 0.5.10",
  "thiserror",
  "tokio",
  "tracing",
@@ -3116,9 +3092,9 @@ dependencies = [
  "cfg_aliases",
  "libc",
  "once_cell",
- "socket2 0.6.5",
+ "socket2 0.5.10",
  "tracing",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -4302,12 +4278,12 @@ checksum = "5283634e518fe9e82c7b20520bb4bc209009fd16c82077c802f8111ecbb0117a"
 
 [[package]]
 name = "type-bridge"
-version = "0.6.1"
+version = "0.6.2"
 source = "registry+ssh://git@ssh.shipyard.rs/stock-trek/crate-index.git"
-checksum = "15cd0145076f5a1ddb8446bfe209b6008c9b4a3778aa2029eacddf69ce777109"
+checksum = "779a614d7cc61534c9fa61feae1c0025f7e56394dd29037a74246ed31aeb98fd"
 dependencies = [
  "bimap",
- "exchange-types 0.12.4",
+ "exchange-types",
  "hashbrown 0.17.1",
  "rust_decimal",
  "serde",
@@ -4528,7 +4504,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
