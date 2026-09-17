@@ -1,4 +1,4 @@
-use crate::{compacter::compact_all, constants::S3_BUCKET, s3::clients, updater::update};
+use crate::{compacter::Compactor, constants::S3_BUCKET, s3::S3, updater::KlinesUpdater};
 use lambda_runtime::{Error, LambdaEvent, run, service_fn};
 use serde_json::{Value, json};
 use tracing::info;
@@ -30,9 +30,9 @@ fn setup_tracing() -> Result<(), Error> {
 
 async fn function_handler(_event: LambdaEvent<Value>) -> Result<Value, Error> {
     info!("get s3 and transfer clients");
-    let (s3_client, transfer_client) = clients().await;
+    let (s3_client, transfer_client) = S3::clients().await;
     let bucket = S3_BUCKET;
-    update(&s3_client, &transfer_client, bucket).await?;
-    compact_all(&s3_client, &transfer_client, bucket).await?;
+    KlinesUpdater::update(&s3_client, &transfer_client, bucket).await?;
+    Compactor::all(&s3_client, &transfer_client, bucket).await?;
     Ok(json!({ "status": "ok" }))
 }

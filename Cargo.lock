@@ -1514,7 +1514,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -1524,7 +1524,7 @@ source = "registry+ssh://git@ssh.shipyard.rs/stock-trek/crate-index.git"
 checksum = "44c1482786454da4dd65c8347aecefa3d525e88eb81516de534c3f9b169750e0"
 dependencies = [
  "async-trait",
- "exchange-types 0.13.0",
+ "exchange-types 0.13.1",
  "futures-timer",
  "httpdate",
  "iris",
@@ -1564,9 +1564,9 @@ dependencies = [
 
 [[package]]
 name = "exchange-types"
-version = "0.13.0"
+version = "0.13.1"
 source = "registry+ssh://git@ssh.shipyard.rs/stock-trek/crate-index.git"
-checksum = "d0e2d2127332a95228620195a7334599e0d11d513a0787852d021b048696ae3f"
+checksum = "affecc639dbe7e243985f4d46e9ab987706e6fc8eb99d5e9cfdf311abbbecdf7"
 dependencies = [
  "bs58",
  "data-encoding",
@@ -2168,7 +2168,7 @@ dependencies = [
  "libc",
  "percent-encoding",
  "pin-project-lite",
- "socket2 0.6.5",
+ "socket2 0.5.10",
  "tokio",
  "tower-service",
  "tracing",
@@ -2633,7 +2633,7 @@ dependencies = [
  "bytes",
  "chrono",
  "exchange-gateway",
- "exchange-types 0.13.0",
+ "exchange-types 0.13.1",
  "hashbrown 0.17.1",
  "lambda_runtime",
  "parquet",
@@ -2735,7 +2735,7 @@ version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -3078,7 +3078,7 @@ dependencies = [
  "quinn-udp",
  "rustc-hash",
  "rustls 0.23.45",
- "socket2 0.6.5",
+ "socket2 0.5.10",
  "thiserror",
  "tokio",
  "tracing",
@@ -3116,9 +3116,9 @@ dependencies = [
  "cfg_aliases",
  "libc",
  "once_cell",
- "socket2 0.6.5",
+ "socket2 0.5.10",
  "tracing",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -4528,7 +4528,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
