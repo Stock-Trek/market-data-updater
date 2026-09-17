@@ -85,22 +85,26 @@ impl KlinesUpdater {
     ) -> Result<()> {
         info!("update exchange {:?} @ end time {}", cex_id, end_time);
         let start_time = QuantizedTime::previous_top(end_time, UPDATE_QUANTIZATION);
-        let candles_relative_file_path = SubFolders::file_path(
-            &[
-                start_time.year(),
-                start_time.month() as i32,
-                start_time.day() as i32,
-                start_time.hour() as i32,
-                start_time.minute() as i32,
-            ],
-            PARQUET_SUFFIX,
-        );
+        let year = start_time.year();
+        let month = start_time.month() as i32;
+        let day = start_time.day() as i32;
+        let hour = start_time.hour() as i32;
+        let minute = start_time.minute() as i32;
+        let candles_relative_file_path =
+            SubFolders::file_path(&[year, month, day, hour, minute], PARQUET_SUFFIX);
+        let compacted_relative_file_paths = [
+            SubFolders::file_path(&[year, month, day, hour], PARQUET_SUFFIX),
+            SubFolders::file_path(&[year, month, day], PARQUET_SUFFIX),
+            SubFolders::file_path(&[year, month], PARQUET_SUFFIX),
+            SubFolders::file_path(&[year], PARQUET_SUFFIX),
+        ];
         let semaphore = Arc::new(Semaphore::new(10));
         let mut join_set = JoinSet::new();
         for trading_pair in trading_pairs {
             info!("update symbol {:?}", trading_pair);
             let bucket = bucket.to_string();
             let candles_relative_file_path = candles_relative_file_path.clone();
+            let compacted_relative_file_paths = compacted_relative_file_paths.clone();
             let schema = schema.clone();
             let semaphore = semaphore.clone();
             let s3_client = s3_client.clone();
@@ -108,16 +112,21 @@ impl KlinesUpdater {
             let updater_clone = updater.clone();
             join_set.spawn(async move {
                 let _permit = semaphore.acquire_owned().await.unwrap();
-                let candles_file_path = format!(
-                    "{}/{}/{}/{}/{}",
-                    trading_mode,
-                    cex_id,
-                    trading_pair.base,
-                    trading_pair.quote,
-                    candles_relative_file_path
+                let candles_base_path = format!(
+                    "{}/{}/{}/{}",
+                    trading_mode, cex_id, trading_pair.base, trading_pair.quote
                 );
+                let candles_file_path =
+                    format!("{}/{}", candles_base_path, candles_relative_file_path);
                 if S3::has_file(&s3_client, &bucket, &candles_file_path).await {
                     return Ok(());
+                }
+                for compacted_relative_file_path in &compacted_relative_file_paths {
+                    let compacted_file_path =
+                        format!("{}/{}", candles_base_path, compacted_relative_file_path);
+                    if S3::has_file(&s3_client, &bucket, &compacted_file_path).await {
+                        return Ok(());
+                    }
                 }
                 let candles = updater_clone
                     .klines(&trading_pair, start_time, end_time)
