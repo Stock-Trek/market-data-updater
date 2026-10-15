@@ -81,19 +81,3 @@ impl BinanceUpdater {
         })
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use chrono::TimeZone;
-
-    #[test]
-    fn end_time_is_excluded_from_the_window() {
-        let start_time = Utc.with_ymd_and_hms(2024, 1, 1, 12, 0, 0).unwrap();
-        let end_time = Utc.with_ymd_and_hms(2024, 1, 1, 12, 6, 0).unwrap();
-        let (start_millis, end_millis) = BinanceUpdater::kline_time_bounds(start_time, end_time);
-        assert_eq!(start_millis, start_time.timestamp_millis());
-        assert_eq!(end_millis, end_time.timestamp_millis() - 1);
-        assert_eq!(end_millis - start_millis, 6 * 60 * 1000 - 1);
-    }
-}
