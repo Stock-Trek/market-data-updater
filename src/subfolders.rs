@@ -61,3 +61,50 @@ impl SubFolders {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn base() -> &'static str {
+        "paper/Binance/Bitcoin/TetherUSD"
+    }
+
+    #[test]
+    fn year_expects_every_calendar_month() {
+        let subfolders = SubFolders::subfolders_from_path(&format!("{}/2024", base())).unwrap();
+        assert_eq!(subfolders.len(), 12);
+        assert_eq!(subfolders.first().unwrap(), "01/");
+        assert_eq!(subfolders.last().unwrap(), "12/");
+        assert!(!subfolders.contains(&"00/".to_string()));
+    }
+
+    #[test]
+    fn month_expects_every_day_of_that_month() {
+        let february = SubFolders::subfolders_from_path(&format!("{}/2024/02", base())).unwrap();
+        assert_eq!(february.len(), 29);
+        assert_eq!(february.first().unwrap(), "01/");
+        assert_eq!(february.last().unwrap(), "29/");
+
+        let april = SubFolders::subfolders_from_path(&format!("{}/2024/04", base())).unwrap();
+        assert_eq!(april.len(), 30);
+    }
+
+    #[test]
+    fn day_expects_every_hour() {
+        let subfolders =
+            SubFolders::subfolders_from_path(&format!("{}/2024/02/01", base())).unwrap();
+        assert_eq!(subfolders.len(), 24);
+        assert_eq!(subfolders.first().unwrap(), "00/");
+        assert_eq!(subfolders.last().unwrap(), "23/");
+    }
+
+    #[test]
+    fn hour_expects_every_six_minute_slot() {
+        let subfolders =
+            SubFolders::subfolders_from_path(&format!("{}/2024/02/01/03", base())).unwrap();
+        assert_eq!(subfolders.len(), 10);
+        assert_eq!(subfolders.first().unwrap(), "00/");
+        assert_eq!(subfolders.last().unwrap(), "54/");
+    }
+}
