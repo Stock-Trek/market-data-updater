@@ -2615,6 +2615,7 @@ dependencies = [
  "parquet",
  "serde_json",
  "stock-trek-types",
+ "thiserror",
  "tokio",
  "tracing",
  "tracing-subscriber",
