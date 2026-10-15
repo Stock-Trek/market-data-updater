@@ -14,18 +14,24 @@ use bytes::Bytes;
 use chrono::{DateTime, Datelike, Timelike, Utc};
 use exchange_types::{klines::Kline, urls::TradingMode};
 use parquet::arrow::ArrowWriter;
-use std::sync::Arc;
+use std::{collections::HashMap, sync::Arc};
 use stock_trek_types::cex::{cex_id::CexId, trading_pair::TradingPair};
 use tokio::{sync::Semaphore, task::JoinSet};
 use tracing::info;
 
 pub struct KlinesUpdater {
-    binance: Arc<BinanceUpdater>,
+    binance: HashMap<TradingMode, Arc<dyn ExchangeUpdater>>,
 }
 
 impl KlinesUpdater {
-    pub fn try_new(trading_mode: TradingMode) -> Result<Self> {
-        let binance = Arc::new(BinanceUpdater::try_new(trading_mode)?);
+    pub fn try_new() -> Result<Self> {
+        let mut binance: HashMap<TradingMode, Arc<dyn ExchangeUpdater>> = HashMap::new();
+        for trading_mode in [TradingMode::Paper, TradingMode::Real] {
+            binance.insert(
+                trading_mode,
+                Arc::new(BinanceUpdater::try_new(trading_mode)?),
+            );
+        }
         Ok(Self { binance })
     }
 
@@ -48,7 +54,11 @@ impl KlinesUpdater {
             let trading_mode = cex_id_trading_mode.1;
             let schema = schema.clone();
             let updater = match cex_id {
-                CexId::Binance => self.binance.clone(),
+                CexId::Binance => {
+                    self.binance.get(&trading_mode).cloned().ok_or_else(|| {
+                        anyhow::anyhow!("Unsupported trading mode: {trading_mode:?}")
+                    })?
+                }
                 other => anyhow::bail!("Unsupported exchange: {other:?}"),
             };
             join_set.spawn(async move {
