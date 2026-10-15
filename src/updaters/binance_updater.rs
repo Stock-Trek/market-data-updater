@@ -41,8 +41,9 @@ impl ExchangeUpdater for BinanceUpdater {
             anyhow::bail!("Cannot find symbol for {:?}", trading_pair)
         };
         let mut request = BinanceKlinesRequest::new(symbol, BinanceKlinesInterval::ONE_MINUTE);
-        request.startTime = Some(Milliseconds(start_time.timestamp_millis()));
-        request.endTime = Some(Milliseconds(end_time.timestamp_millis()));
+        let (start_millis, end_millis) = Self::kline_time_bounds(start_time, end_time);
+        request.startTime = Some(Milliseconds(start_millis));
+        request.endTime = Some(Milliseconds(end_millis));
         request.limit = KLINE_LIMIT
             .map(|limit| BinanceKlinesLimit::try_new(u32::from(limit)))
             .transpose()?;
@@ -57,6 +58,13 @@ impl ExchangeUpdater for BinanceUpdater {
 }
 
 impl BinanceUpdater {
+    fn kline_time_bounds(start_time: DateTime<Utc>, end_time: DateTime<Utc>) -> (i64, i64) {
+        (
+            start_time.timestamp_millis(),
+            end_time.timestamp_millis() - 1,
+        )
+    }
+
     pub fn try_new(trading_mode: TradingMode) -> Result<Self> {
         let converter = BinanceConverter::default();
         let signer = Signer::new_unencrypted(ByteEncoder::HexLower);
@@ -71,5 +79,21 @@ impl BinanceUpdater {
             converter,
             connector,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::TimeZone;
+
+    #[test]
+    fn end_time_is_excluded_from_the_window() {
+        let start_time = Utc.with_ymd_and_hms(2024, 1, 1, 12, 0, 0).unwrap();
+        let end_time = Utc.with_ymd_and_hms(2024, 1, 1, 12, 6, 0).unwrap();
+        let (start_millis, end_millis) = BinanceUpdater::kline_time_bounds(start_time, end_time);
+        assert_eq!(start_millis, start_time.timestamp_millis());
+        assert_eq!(end_millis, end_time.timestamp_millis() - 1);
+        assert_eq!(end_millis - start_millis, 6 * 60 * 1000 - 1);
     }
 }
