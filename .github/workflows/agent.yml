@@ -23,7 +23,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
-      contents: write
+      contents: read
       id-token: write
       issues: write
     outputs:
@@ -45,7 +45,7 @@ jobs:
         uses: Infisical/secrets-action@v1.0.16
         with:
           method: "oidc"
-          identity-id: "c603d49b-292c-42ae-b838-52e03e3c3a84"
+          identity-id: "fafecebc-b41d-496d-915f-5ce536a6644b"
           project-slug: "agents"
           env-slug: "dev"
 
@@ -245,14 +245,14 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
-      contents: write
+      contents: read
       id-token: write
     steps:
       - name: Infisical
         uses: Infisical/secrets-action@v1.0.16
         with:
           method: "oidc"
-          identity-id: "c603d49b-292c-42ae-b838-52e03e3c3a84"
+          identity-id: "fafecebc-b41d-496d-915f-5ce536a6644b"
           project-slug: "agents"
           env-slug: "dev"
 
@@ -285,7 +285,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
-      contents: write
+      contents: read
       id-token: write
       issues: write
     steps:
@@ -293,7 +293,7 @@ jobs:
         uses: Infisical/secrets-action@v1.0.16
         with:
           method: "oidc"
-          identity-id: "c603d49b-292c-42ae-b838-52e03e3c3a84"
+          identity-id: "fafecebc-b41d-496d-915f-5ce536a6644b"
           project-slug: "agents"
           env-slug: "dev"
 
@@ -346,7 +346,7 @@ jobs:
         uses: Infisical/secrets-action@v1.0.16
         with:
           method: "oidc"
-          identity-id: "c603d49b-292c-42ae-b838-52e03e3c3a84"
+          identity-id: "fafecebc-b41d-496d-915f-5ce536a6644b"
           project-slug: "agents"
           env-slug: "dev"
 
@@ -596,7 +596,16 @@ jobs:
           echo "has-changes=${HAS_CHANGES}" >> "$GITHUB_OUTPUT"
       - name: Commit and push code changes
         if: (steps.save-response-type.outputs.response-type == 'CAN_ADDRESS_FULLY') && (steps.check-for-code-changes.outputs.has-changes == 'true')
+        env:
+          GIT_AUTH_TOKEN: ${{ steps.app-token.outputs.token }}
         run: |
+          # The agent step removes the persisted git credential so the agent
+          # cannot use it; restore it for the push now that the agent has
+          # finished. The token is only ever present after the agent has run.
+          GIT_AUTH_HEADER=$(printf 'x-access-token:%s' "${GIT_AUTH_TOKEN}")
+          GIT_AUTH_HEADER=$(printf '%s' "${GIT_AUTH_HEADER}" | base64 -w 0)
+          git config --local "http.https://github.com/.extraheader" \
+            "AUTHORIZATION: basic ${GIT_AUTH_HEADER}"
           # The agent may have switched branches or rebased while addressing the
           # issue; make sure the changes are committed on (and pushed to) the
           # issue branch rather than whatever branch we are on now.
@@ -746,7 +755,7 @@ jobs:
               }
             }
             body += `\nYou can find the full logs [here](${run.html_url}).\n`;
-            body += "\nIf you'd like me to try again, please add a comment mentioning @agent.";
+            body += "\nIf you'd like me to try again, please add a comment mentioning '@ agent' (no space).";
 
             await github.rest.issues.createComment({
               owner,
