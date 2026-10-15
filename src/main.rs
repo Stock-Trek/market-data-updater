@@ -7,6 +7,7 @@ use tracing_subscriber::{EnvFilter, fmt::Subscriber};
 
 mod compacter;
 mod constants;
+mod error;
 mod quantized_time;
 mod s3;
 mod subfolders;

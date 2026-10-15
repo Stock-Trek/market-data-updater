@@ -1,5 +1,10 @@
-use crate::{constants::PARQUET_SUFFIX, s3::S3, subfolders::SubFolders};
-use anyhow::{Ok, Result, anyhow};
+use crate::{
+    constants::PARQUET_SUFFIX,
+    error::{MduError, MduResult},
+    s3::S3,
+    subfolders::SubFolders,
+};
+use anyhow::Result;
 use arrow::compute::concat;
 use arrow_array::RecordBatch;
 use arrow_schema::SchemaRef;
@@ -157,8 +162,16 @@ impl Compactor {
         info!("download batches for key {}", &files[0]);
         let first_bytes = S3::download_bytes(transfer_client, &bucket_owned, &files[0]).await?;
         let mut first_reader = ParquetRecordBatchReader::try_new(first_bytes, 1024 * 1024)?;
-        let schema = first_reader.next().unwrap()?.schema();
-        let mut all_batches = first_reader.collect::<Result<Vec<RecordBatch>, _>>()?;
+        let first_batch =
+            first_reader
+                .next()
+                .transpose()?
+                .ok_or_else(|| MduError::EmptyParquet {
+                    key: files[0].clone(),
+                })?;
+        let schema = first_batch.schema();
+        let mut all_batches = vec![first_batch];
+        all_batches.extend(first_reader.collect::<Result<Vec<RecordBatch>, _>>()?);
         let mut join_set: JoinSet<Result<Vec<RecordBatch>>> = JoinSet::new();
         for file_key in &files[1..] {
             let client = transfer_client.clone();
@@ -189,9 +202,9 @@ impl Compactor {
         Ok(batches)
     }
 
-    fn combine(batches: &[RecordBatch], schema: &SchemaRef) -> Result<RecordBatch> {
+    fn combine(batches: &[RecordBatch], schema: &SchemaRef) -> MduResult<RecordBatch> {
         if batches.is_empty() {
-            return Err(anyhow!("No batches to combine"));
+            return Err(MduError::NoBatches);
         }
         if batches.len() == 1 {
             return Ok(batches[0].clone());
@@ -210,10 +223,10 @@ impl Compactor {
                     .iter()
                     .map(|arr| arr.as_ref())
                     .collect::<Vec<_>>();
-                concat(&arrays).expect("Failed to concatenate arrays")
+                concat(&arrays).map_err(MduError::from)
             })
-            .collect::<Vec<_>>();
-        RecordBatch::try_new(schema.clone(), final_columns).map_err(Into::into)
+            .collect::<MduResult<Vec<_>>>()?;
+        RecordBatch::try_new(schema.clone(), final_columns).map_err(MduError::from)
     }
 
     fn batch_to_bytes(batch: &RecordBatch, schema: SchemaRef) -> Result<Bytes> {
