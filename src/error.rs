@@ -7,8 +7,6 @@ pub type MduResult<T> = Result<T, MduError>;
 pub enum MduError {
     #[error("Parquet file {key} contains no record batches")]
     EmptyParquet { key: String },
-    #[error("No record batches to combine")]
-    NoBatches,
     #[error("Arrow error: {0}")]
     Arrow(#[from] ArrowError),
     #[error("Month {month} must be between 1 and 12")]

@@ -1,19 +1,18 @@
 use crate::{
-    constants::PARQUET_SUFFIX,
-    error::{MduError, MduResult},
-    s3::S3,
+    constants::PARQUET_SUFFIX, error::MduError, parquet_writer::writer_properties, s3::S3,
     subfolders::SubFolders,
 };
 use anyhow::Result;
-use arrow::compute::concat;
 use arrow_array::RecordBatch;
-use arrow_schema::SchemaRef;
 use aws_sdk_s3::Client as S3Client;
 use aws_sdk_s3_transfer_manager::Client as TransferClient;
 use bytes::Bytes;
 use parquet::arrow::{ArrowWriter, arrow_reader::ParquetRecordBatchReader};
 use tokio::task::JoinSet;
-use tracing::{error, info, warn};
+use tracing::{info, warn};
+
+const READ_BATCH_SIZE: usize = 8192;
+const MAX_CONCURRENT_DOWNLOADS: usize = 8;
 
 pub struct Compactor;
 
@@ -29,7 +28,7 @@ impl Compactor {
         bucket: &str,
     ) -> Result<()> {
         info!("compact all");
-        Self::folder(&s3_client, &transfer_client, bucket, "", PARQUET_SUFFIX).await?;
+        Self::folder(s3_client, transfer_client, bucket, "", PARQUET_SUFFIX).await?;
         Ok(())
     }
 
@@ -41,6 +40,14 @@ impl Compactor {
         suffix: &str,
     ) -> Result<()> {
         info!("compact folder with prefix {}", prefix);
+        let expected_subfolders = SubFolders::subfolders_from_path(prefix)?;
+        if !expected_subfolders.is_empty() {
+            let compacted_file = Self::compacted_file_path(prefix, suffix);
+            if S3::has_file(s3_client, &bucket, &compacted_file).await? {
+                info!("{} is already compacted", compacted_file);
+                return Ok(());
+            }
+        }
         let subfolders_files = Self::subfolders_files(s3_client, bucket, prefix, suffix).await?;
         for subfolder in &subfolders_files.subfolders {
             let subfolder_full_path = format!("{}{}", prefix, subfolder);
@@ -53,7 +60,6 @@ impl Compactor {
             ))
             .await?;
         }
-        let expected_subfolders = SubFolders::subfolders_from_path(prefix)?;
         if expected_subfolders.is_empty() {
             info!("no expected subfolders for {}", prefix);
             return Ok(());
@@ -82,7 +88,7 @@ impl Compactor {
             );
             return Ok(());
         }
-        let compacted_file = format!("{}{}", prefix.trim_end_matches('/'), suffix);
+        let compacted_file = Self::compacted_file_path(prefix, suffix);
         info!("compact files {:?} to {}", expected_files, compacted_file);
         Self::files(
             s3_client,
@@ -93,6 +99,10 @@ impl Compactor {
         )
         .await?;
         Ok(())
+    }
+
+    fn compacted_file_path(prefix: &str, suffix: &str) -> String {
+        format!("{}{}", prefix.trim_end_matches('/'), suffix)
     }
 
     async fn subfolders_files(
@@ -132,7 +142,7 @@ impl Compactor {
         s3_client: &S3Client,
         transfer_client: &TransferClient,
         bucket: &str,
-        files: &Vec<String>,
+        files: &[String],
         compacted_file: &str,
     ) -> Result<()> {
         info!("compact files {:?} to {}", files, compacted_file);
@@ -140,54 +150,56 @@ impl Compactor {
             warn!("No data to compact");
             return Ok(());
         }
-        let (batches, schema) = Self::download_batches(transfer_client, bucket, files).await?;
-        let combined_batch = Self::combine(&batches, &schema)?;
-        let bytes = Self::batch_to_bytes(&combined_batch, schema)?;
+        let bytes = Self::compact(transfer_client, bucket, files).await?;
         S3::upload_bytes(transfer_client, &bucket, &compacted_file, bytes).await?;
         S3::delete_all(s3_client, &bucket, files).await?;
         Ok(())
     }
 
-    async fn download_batches(
+    async fn compact(
         transfer_client: &TransferClient,
         bucket: &str,
-        files: &Vec<String>,
-    ) -> Result<(Vec<RecordBatch>, SchemaRef)> {
-        info!("download batches for files {:?}", files);
-        if files.is_empty() {
-            error!("No files provided");
-            anyhow::bail!("No files provided");
+        files: &[String],
+    ) -> Result<Bytes> {
+        info!("compact {} files", files.len());
+        let first_batches =
+            Self::download_batches_for_key(transfer_client, bucket, &files[0]).await?;
+        let schema = first_batches
+            .first()
+            .map(RecordBatch::schema)
+            .ok_or_else(|| MduError::EmptyParquet {
+                key: files[0].clone(),
+            })?;
+        let mut writer = ArrowWriter::try_new(Vec::new(), schema, Some(writer_properties()))?;
+        for batch in &first_batches {
+            writer.write(batch)?;
         }
+        drop(first_batches);
         let bucket_owned = bucket.to_string();
-        info!("download batches for key {}", &files[0]);
-        let first_bytes = S3::download_bytes(transfer_client, &bucket_owned, &files[0]).await?;
-        let mut first_reader = ParquetRecordBatchReader::try_new(first_bytes, 1024 * 1024)?;
-        let first_batch =
-            first_reader
-                .next()
-                .transpose()?
-                .ok_or_else(|| MduError::EmptyParquet {
-                    key: files[0].clone(),
-                })?;
-        let schema = first_batch.schema();
-        let mut all_batches = vec![first_batch];
-        all_batches.extend(first_reader.collect::<Result<Vec<RecordBatch>, _>>()?);
-        let mut join_set: JoinSet<Result<Vec<RecordBatch>>> = JoinSet::new();
-        for file_key in &files[1..] {
-            let client = transfer_client.clone();
-            let bucket_clone = bucket_owned.clone();
-            let file_key = file_key.clone();
-            join_set.spawn(async move {
-                let batches =
-                    Self::download_batches_for_key(&client, &bucket_clone, &file_key).await?;
-                Ok(batches)
-            });
+        for chunk in files[1..].chunks(MAX_CONCURRENT_DOWNLOADS) {
+            let mut join_set: JoinSet<Result<(usize, Vec<RecordBatch>)>> = JoinSet::new();
+            for (offset, file_key) in chunk.iter().enumerate() {
+                let client = transfer_client.clone();
+                let bucket = bucket_owned.clone();
+                let file_key = file_key.clone();
+                join_set.spawn(async move {
+                    let batches =
+                        Self::download_batches_for_key(&client, &bucket, &file_key).await?;
+                    Ok((offset, batches))
+                });
+            }
+            let mut batches_by_offset = vec![None; chunk.len()];
+            while let Some(result) = join_set.join_next().await {
+                let (offset, batches) = result??;
+                batches_by_offset[offset] = Some(batches);
+            }
+            for batches in batches_by_offset.into_iter().flatten() {
+                for batch in &batches {
+                    writer.write(batch)?;
+                }
+            }
         }
-        while let Some(result) = join_set.join_next().await {
-            let batches = result??;
-            all_batches.extend(batches);
-        }
-        Ok((all_batches, schema))
+        Ok(Bytes::from(writer.into_inner()?))
     }
 
     async fn download_batches_for_key(
@@ -196,44 +208,9 @@ impl Compactor {
         key: &str,
     ) -> Result<Vec<RecordBatch>> {
         info!("download batches for key {}", key);
-        let bytes = S3::download_bytes(&transfer_client, &bucket, &key).await?;
-        let reader = ParquetRecordBatchReader::try_new(bytes, 1024 * 1024)?;
+        let bytes = S3::download_bytes(transfer_client, &bucket, &key).await?;
+        let reader = ParquetRecordBatchReader::try_new(bytes, READ_BATCH_SIZE)?;
         let batches = reader.collect::<Result<Vec<RecordBatch>, _>>()?;
         Ok(batches)
-    }
-
-    fn combine(batches: &[RecordBatch], schema: &SchemaRef) -> MduResult<RecordBatch> {
-        if batches.is_empty() {
-            return Err(MduError::NoBatches);
-        }
-        if batches.len() == 1 {
-            return Ok(batches[0].clone());
-        }
-        let num_columns = schema.fields().len();
-        let mut combined_columns = vec![Vec::new(); num_columns];
-        for batch in batches {
-            for col_idx in 0..num_columns {
-                combined_columns[col_idx].push(batch.column(col_idx).clone());
-            }
-        }
-        let final_columns = combined_columns
-            .into_iter()
-            .map(|col_batches| {
-                let arrays = col_batches
-                    .iter()
-                    .map(|arr| arr.as_ref())
-                    .collect::<Vec<_>>();
-                concat(&arrays).map_err(MduError::from)
-            })
-            .collect::<MduResult<Vec<_>>>()?;
-        RecordBatch::try_new(schema.clone(), final_columns).map_err(MduError::from)
-    }
-
-    fn batch_to_bytes(batch: &RecordBatch, schema: SchemaRef) -> Result<Bytes> {
-        let mut vec = Vec::new();
-        let mut writer = ArrowWriter::try_new(&mut vec, schema, None)?;
-        writer.write(batch)?;
-        writer.close()?;
-        Ok(Bytes::from(vec))
     }
 }
