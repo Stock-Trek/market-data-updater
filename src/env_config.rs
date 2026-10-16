@@ -1,7 +1,6 @@
 use std::env;
 
 const S3_BUCKET_ENV_VAR: &str = "S3_BUCKET";
-const AWS_LAMBDA_FUNCTION_NAME_ENV_VAR: &str = "AWS_LAMBDA_FUNCTION_NAME";
 const LAMBDA_FUNCTION_NAME_ENV_VAR: &str = "LAMBDA_FUNCTION_NAME";
 
 const DEFAULT_S3_BUCKET: &str = "stock-trek-market-data";
@@ -17,8 +16,7 @@ impl EnvConfig {
         Self {
             s3_bucket: env::var(S3_BUCKET_ENV_VAR)
                 .unwrap_or_else(|_| DEFAULT_S3_BUCKET.to_string()),
-            lambda_function_name: env::var(AWS_LAMBDA_FUNCTION_NAME_ENV_VAR)
-                .or_else(|_| env::var(LAMBDA_FUNCTION_NAME_ENV_VAR))
+            lambda_function_name: env::var(LAMBDA_FUNCTION_NAME_ENV_VAR)
                 .unwrap_or_else(|_| DEFAULT_LAMBDA_FUNCTION_NAME.to_string()),
         }
     }
