@@ -1,6 +1,5 @@
 use crate::{
-    constants::PARQUET_SUFFIX, error::MduError, parquet_writer::writer_properties, s3::S3,
-    subfolders::SubFolders,
+    constants::PARQUET_SUFFIX, parquet_writer::writer_properties, s3::S3, subfolders::SubFolders,
 };
 use anyhow::Result;
 use arrow_array::RecordBatch;
@@ -150,7 +149,14 @@ impl Compactor {
             warn!("No data to compact");
             return Ok(());
         }
-        let bytes = Self::compact(transfer_client, bucket, files).await?;
+        let Some(bytes) = Self::compact(transfer_client, bucket, files).await? else {
+            warn!(
+                "no non-empty data to compact for {:?}; removing empty files",
+                files
+            );
+            S3::delete_all(s3_client, &bucket, files).await?;
+            return Ok(());
+        };
         S3::upload_bytes(transfer_client, &bucket, &compacted_file, bytes).await?;
         S3::delete_all(s3_client, &bucket, files).await?;
         Ok(())
@@ -160,20 +166,12 @@ impl Compactor {
         transfer_client: &TransferClient,
         bucket: &str,
         files: &[String],
-    ) -> Result<Bytes> {
+    ) -> Result<Option<Bytes>> {
         info!("compact {} files", files.len());
+        let mut writer: Option<ArrowWriter<Vec<u8>>> = None;
         let first_batches =
             Self::download_batches_for_key(transfer_client, bucket, &files[0]).await?;
-        let schema = first_batches
-            .first()
-            .map(RecordBatch::schema)
-            .ok_or_else(|| MduError::EmptyParquet {
-                key: files[0].clone(),
-            })?;
-        let mut writer = ArrowWriter::try_new(Vec::new(), schema, Some(writer_properties()))?;
-        for batch in &first_batches {
-            writer.write(batch)?;
-        }
+        Self::write_batches(&mut writer, &first_batches)?;
         drop(first_batches);
         let bucket_owned = bucket.to_string();
         for chunk in files[1..].chunks(MAX_CONCURRENT_DOWNLOADS) {
@@ -194,12 +192,33 @@ impl Compactor {
                 batches_by_offset[offset] = Some(batches);
             }
             for batches in batches_by_offset.into_iter().flatten() {
-                for batch in &batches {
-                    writer.write(batch)?;
-                }
+                Self::write_batches(&mut writer, &batches)?;
             }
         }
-        Ok(Bytes::from(writer.into_inner()?))
+        let Some(writer) = writer else {
+            warn!("all parquet files for compaction are empty");
+            return Ok(None);
+        };
+        Ok(Some(Bytes::from(writer.into_inner()?)))
+    }
+
+    fn write_batches(
+        writer: &mut Option<ArrowWriter<Vec<u8>>>,
+        batches: &[RecordBatch],
+    ) -> Result<()> {
+        for batch in batches {
+            if writer.is_none() {
+                *writer = Some(ArrowWriter::try_new(
+                    Vec::new(),
+                    batch.schema(),
+                    Some(writer_properties()),
+                )?);
+            }
+            if let Some(writer) = writer.as_mut() {
+                writer.write(batch)?;
+            }
+        }
+        Ok(())
     }
 
     async fn download_batches_for_key(

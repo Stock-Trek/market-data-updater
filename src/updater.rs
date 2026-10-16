@@ -21,7 +21,7 @@ use std::{
 };
 use stock_trek_types::cex::{cex_id::CexId, trading_pair::TradingPair};
 use tokio::{sync::Semaphore, task::JoinSet};
-use tracing::info;
+use tracing::{info, warn};
 
 pub struct KlinesUpdater {
     binance: HashMap<TradingMode, Arc<dyn ExchangeUpdater>>,
@@ -127,6 +127,17 @@ impl KlinesUpdater {
                     let candles = updater_clone
                         .klines(&trading_pair, start_time, window_end_time)
                         .await?;
+                    if !Self::candles_are_complete(&candles, start_time, window_end_time) {
+                        warn!(
+                            "incomplete klines for {:?} between {} and {}: expected {} candles, received {}; skipping upload",
+                            trading_pair,
+                            start_time,
+                            window_end_time,
+                            Self::expected_candles(start_time, window_end_time),
+                            candles.len()
+                        );
+                        continue;
+                    }
                     let candles_bytes = Self::candles_to_bytes(&candles, &schema)?;
                     let candles_relative_file_path = Self::window_file_paths(start_time).0;
                     let candles_file_path =
@@ -265,6 +276,24 @@ impl KlinesUpdater {
             Field::new("close", DataType::Float64, true),
             Field::new("volume", DataType::Float64, true),
         ]))
+    }
+
+    fn expected_candles(start_time: DateTime<Utc>, end_time: DateTime<Utc>) -> usize {
+        (end_time - start_time).num_minutes().max(0) as usize
+    }
+
+    fn candles_are_complete(
+        candles: &[Kline],
+        start_time: DateTime<Utc>,
+        end_time: DateTime<Utc>,
+    ) -> bool {
+        if candles.len() != Self::expected_candles(start_time, end_time) {
+            return false;
+        }
+        candles.iter().enumerate().all(|(index, kline)| {
+            let expected_open_time = start_time + chrono::Duration::minutes(index as i64);
+            kline.open_time.0 == expected_open_time.timestamp_millis()
+        })
     }
 
     fn candles_to_bytes(candles: &[Kline], schema: &SchemaRef) -> Result<Bytes> {
