@@ -1,17 +1,20 @@
+use std::sync::atomic::{AtomicU64, Ordering};
+
 use crate::{
-    constants::PARQUET_SUFFIX, parquet_writer::writer_properties, s3::S3, subfolders::SubFolders,
+    constants::PARQUET_SUFFIX, parquet_reader::ParquetReader, parquet_writer::writer_properties,
+    s3::S3, subfolders::SubFolders,
 };
 use anyhow::Result;
-use arrow_array::RecordBatch;
 use aws_sdk_s3::Client as S3Client;
 use aws_sdk_s3_transfer_manager::Client as TransferClient;
-use bytes::Bytes;
-use parquet::arrow::{ArrowWriter, arrow_reader::ParquetRecordBatchReader};
-use tokio::task::JoinSet;
+use futures::TryStreamExt;
+use parquet::arrow::{AsyncArrowWriter, ParquetRecordBatchStreamBuilder};
+use tokio::fs::File;
 use tracing::{info, warn};
 
 const READ_BATCH_SIZE: usize = 8192;
-const MAX_CONCURRENT_DOWNLOADS: usize = 8;
+
+static TEMP_FILE_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 pub struct Compactor;
 
@@ -65,14 +68,7 @@ impl Compactor {
         }
         let expected_files = expected_subfolders
             .iter()
-            .map(|f| {
-                format!(
-                    "{}{}{}",
-                    prefix,
-                    f.strip_suffix('/').or(Some(f)).unwrap(),
-                    suffix
-                )
-            })
+            .map(|f| format!("{}{}{}", prefix, f.strip_suffix('/').unwrap_or(f), suffix))
             .collect::<Vec<_>>();
         let missing = expected_files
             .iter()
@@ -127,10 +123,10 @@ impl Compactor {
                     .map(|s| s.strip_prefix(prefix).unwrap_or(s).to_string()),
             );
             for object in page.contents() {
-                if let Some(key) = object.key() {
-                    if key.ends_with(suffix) {
-                        files.push(key.to_string());
-                    }
+                if let Some(key) = object.key()
+                    && key.ends_with(suffix)
+                {
+                    files.push(key.to_string());
                 }
             }
         }
@@ -149,87 +145,71 @@ impl Compactor {
             warn!("No data to compact");
             return Ok(());
         }
-        let Some(bytes) = Self::compact(transfer_client, bucket, files).await? else {
+        if !Self::compact(s3_client, transfer_client, bucket, files, compacted_file).await? {
             warn!(
                 "no non-empty data to compact for {:?}; removing empty files",
                 files
             );
-            S3::delete_all(s3_client, &bucket, files).await?;
-            return Ok(());
-        };
-        S3::upload_bytes(transfer_client, &bucket, &compacted_file, bytes).await?;
+        }
         S3::delete_all(s3_client, &bucket, files).await?;
         Ok(())
     }
 
     async fn compact(
+        s3_client: &S3Client,
         transfer_client: &TransferClient,
         bucket: &str,
         files: &[String],
-    ) -> Result<Option<Bytes>> {
+        compacted_file: &str,
+    ) -> Result<bool> {
         info!("compact {} files", files.len());
-        let mut writer: Option<ArrowWriter<Vec<u8>>> = None;
-        let first_batches =
-            Self::download_batches_for_key(transfer_client, bucket, &files[0]).await?;
-        Self::write_batches(&mut writer, &first_batches)?;
-        drop(first_batches);
-        let bucket_owned = bucket.to_string();
-        for chunk in files[1..].chunks(MAX_CONCURRENT_DOWNLOADS) {
-            let mut join_set: JoinSet<Result<(usize, Vec<RecordBatch>)>> = JoinSet::new();
-            for (offset, file_key) in chunk.iter().enumerate() {
-                let client = transfer_client.clone();
-                let bucket = bucket_owned.clone();
-                let file_key = file_key.clone();
-                join_set.spawn(async move {
-                    let batches =
-                        Self::download_batches_for_key(&client, &bucket, &file_key).await?;
-                    Ok((offset, batches))
-                });
+        let temp_path = Self::temp_file_path();
+        let mut writer: Option<AsyncArrowWriter<File>> = None;
+        let result = async {
+            for file_key in files {
+                let file_size = S3::object_size(s3_client, &bucket, file_key).await?;
+                let reader = ParquetReader::new(transfer_client, bucket, file_key, file_size);
+                let mut stream = ParquetRecordBatchStreamBuilder::new(reader)
+                    .await?
+                    .with_batch_size(READ_BATCH_SIZE)
+                    .build()?;
+                while let Some(batch) = stream.try_next().await? {
+                    if writer.is_none() {
+                        let output = File::create(&temp_path).await?;
+                        writer = Some(AsyncArrowWriter::try_new(
+                            output,
+                            batch.schema(),
+                            Some(writer_properties()),
+                        )?);
+                    }
+                    if let Some(writer) = writer.as_mut() {
+                        writer.write(&batch).await?;
+                    }
+                }
             }
-            let mut batches_by_offset = vec![None; chunk.len()];
-            while let Some(result) = join_set.join_next().await {
-                let (offset, batches) = result??;
-                batches_by_offset[offset] = Some(batches);
-            }
-            for batches in batches_by_offset.into_iter().flatten() {
-                Self::write_batches(&mut writer, &batches)?;
-            }
+            Ok::<_, anyhow::Error>(())
+        }
+        .await;
+        if let Err(error) = result {
+            tokio::fs::remove_file(&temp_path).await.ok();
+            return Err(error);
         }
         let Some(writer) = writer else {
             warn!("all parquet files for compaction are empty");
-            return Ok(None);
+            return Ok(false);
         };
-        Ok(Some(Bytes::from(writer.into_inner()?)))
+        writer.close().await?;
+        S3::upload_file(transfer_client, &bucket, &compacted_file, &temp_path).await?;
+        tokio::fs::remove_file(&temp_path).await.ok();
+        Ok(true)
     }
 
-    fn write_batches(
-        writer: &mut Option<ArrowWriter<Vec<u8>>>,
-        batches: &[RecordBatch],
-    ) -> Result<()> {
-        for batch in batches {
-            if writer.is_none() {
-                *writer = Some(ArrowWriter::try_new(
-                    Vec::new(),
-                    batch.schema(),
-                    Some(writer_properties()),
-                )?);
-            }
-            if let Some(writer) = writer.as_mut() {
-                writer.write(batch)?;
-            }
-        }
-        Ok(())
-    }
-
-    async fn download_batches_for_key(
-        transfer_client: &TransferClient,
-        bucket: &str,
-        key: &str,
-    ) -> Result<Vec<RecordBatch>> {
-        info!("download batches for key {}", key);
-        let bytes = S3::download_bytes(transfer_client, &bucket, &key).await?;
-        let reader = ParquetRecordBatchReader::try_new(bytes, READ_BATCH_SIZE)?;
-        let batches = reader.collect::<Result<Vec<RecordBatch>, _>>()?;
-        Ok(batches)
+    fn temp_file_path() -> std::path::PathBuf {
+        let counter = TEMP_FILE_COUNTER.fetch_add(1, Ordering::Relaxed);
+        std::env::temp_dir().join(format!(
+            "market-data-updater-compaction-{}-{}.parquet",
+            std::process::id(),
+            counter
+        ))
     }
 }

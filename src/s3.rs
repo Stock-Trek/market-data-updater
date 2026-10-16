@@ -1,3 +1,5 @@
+use std::path::Path;
+
 use anyhow::Result;
 use aws_config::BehaviorVersion;
 use aws_sdk_s3::{
@@ -45,6 +47,21 @@ impl S3 {
             Err(SdkError::ServiceError(e)) if e.err().is_not_found() => Ok(false),
             Err(e) => Err(e.into()),
         }
+    }
+
+    pub async fn object_size(
+        s3_client: &S3Client,
+        bucket: &impl AsRef<str>,
+        key: &impl AsRef<str>,
+    ) -> Result<u64> {
+        info!("get size for file {}", key.as_ref());
+        let output = s3_client
+            .head_object()
+            .bucket(bucket.as_ref())
+            .key(key.as_ref())
+            .send()
+            .await?;
+        Ok(output.content_length().unwrap_or_default().max(0) as u64)
     }
 
     pub async fn list_files(
@@ -115,26 +132,6 @@ impl S3 {
         Ok(())
     }
 
-    pub async fn download_bytes(
-        transfer_client: &TransferClient,
-        bucket: &impl AsRef<str>,
-        key: &impl AsRef<str>,
-    ) -> Result<Bytes> {
-        info!("download bytes for key {}", key.as_ref());
-        let mut handle = transfer_client
-            .download()
-            .bucket(bucket.as_ref())
-            .key(key.as_ref())
-            .initiate()?;
-        let mut file_data = Vec::new();
-        while let Some(chunk_result) = handle.body_mut().next().await {
-            let chunk = chunk_result?.data.into_bytes();
-            file_data.extend_from_slice(&chunk);
-        }
-        let bytes = Bytes::from(file_data);
-        Ok(bytes)
-    }
-
     pub async fn upload_bytes(
         transfer_client: &TransferClient,
         bucket: &impl AsRef<str>,
@@ -159,7 +156,7 @@ impl S3 {
         transfer_client: &TransferClient,
         bucket: &impl AsRef<str>,
         key: &impl AsRef<str>,
-        file_path: &impl AsRef<str>,
+        file_path: &impl AsRef<Path>,
     ) -> Result<()> {
         let mut handle = transfer_client
             .download()
@@ -174,12 +171,11 @@ impl S3 {
         Ok(())
     }
 
-    #[allow(dead_code)]
     pub async fn upload_file(
         transfer_client: &TransferClient,
         bucket: &impl AsRef<str>,
         key: &impl AsRef<str>,
-        file_path: &impl AsRef<str>,
+        file_path: &impl AsRef<Path>,
     ) -> Result<()> {
         let stream = InputStream::from_path(file_path.as_ref())?;
         transfer_client
