@@ -5,8 +5,6 @@ pub type MduResult<T> = Result<T, MduError>;
 
 #[derive(Debug, Error)]
 pub enum MduError {
-    #[error("Parquet file {key} contains no record batches")]
-    EmptyParquet { key: String },
     #[error("Arrow error: {0}")]
     Arrow(#[from] ArrowError),
     #[error("Month {month} must be between 1 and 12")]
