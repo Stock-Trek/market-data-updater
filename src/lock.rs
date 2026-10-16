@@ -106,9 +106,30 @@ impl LockGuard {
         if self.released {
             return Ok(());
         }
-        let result = delete_lock(&self.s3_client, &self.bucket, &self.key, &self.e_tag).await;
+        let result = Self::delete_lock(&self.s3_client, &self.bucket, &self.key, &self.e_tag).await;
         self.released = result.is_ok();
         result
+    }
+
+    async fn delete_lock(s3_client: &S3Client, bucket: &str, key: &str, e_tag: &str) -> Result<()> {
+        match s3_client
+            .delete_object()
+            .bucket(bucket)
+            .key(key)
+            .if_match(e_tag)
+            .send()
+            .await
+        {
+            Ok(_) => {
+                info!("released lock {}", key);
+                Ok(())
+            }
+            Err(error) if Self::is_precondition_failed(&error) => {
+                warn!("lock {} was taken over before release", key);
+                Ok(())
+            }
+            Err(error) => Err(error.into()),
+        }
     }
 
     fn is_precondition_failed<E>(error: &SdkError<E>) -> bool
@@ -143,7 +164,9 @@ impl Drop for LockGuard {
         match tokio::runtime::Handle::try_current() {
             Ok(handle) => {
                 let _ = handle.spawn(async move {
-                    if let Err(error) = delete_lock(&s3_client, &bucket, &key, &e_tag).await {
+                    if let Err(error) =
+                        LockGuard::delete_lock(&s3_client, &bucket, &key, &e_tag).await
+                    {
                         warn!("failed to release lock {} on drop: {error}", key);
                     }
                 });
@@ -152,26 +175,5 @@ impl Drop for LockGuard {
                 warn!("no tokio runtime available to release lock {} on drop", key);
             }
         }
-    }
-}
-
-async fn delete_lock(s3_client: &S3Client, bucket: &str, key: &str, e_tag: &str) -> Result<()> {
-    match s3_client
-        .delete_object()
-        .bucket(bucket)
-        .key(key)
-        .if_match(e_tag)
-        .send()
-        .await
-    {
-        Ok(_) => {
-            info!("released lock {}", key);
-            Ok(())
-        }
-        Err(error) if LockGuard::is_precondition_failed(&error) => {
-            warn!("lock {} was taken over before release", key);
-            Ok(())
-        }
-        Err(error) => Err(error.into()),
     }
 }
