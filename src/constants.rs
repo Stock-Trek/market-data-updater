@@ -3,7 +3,6 @@ use exchange_types::urls::TradingMode;
 use hashbrown::HashMap;
 use stock_trek_types::cex::{asset_id::AssetId, cex_id::CexId, trading_pair::TradingPair};
 
-pub const S3_BUCKET: &str = "stock-trek-market-data";
 pub const PARQUET_SUFFIX: &str = ".parquet";
 pub const LOCK_KEY: &str = "_locks/market-data-updater";
 

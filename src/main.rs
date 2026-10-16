@@ -1,6 +1,7 @@
 use crate::{
     compacter::Compactor,
-    constants::{LOCK_KEY, S3_BUCKET},
+    constants::LOCK_KEY,
+    env_config::EnvConfig,
     lock::LockGuard,
     s3::S3,
     updater::KlinesUpdater,
@@ -12,6 +13,7 @@ use tracing_subscriber::{EnvFilter, fmt::Subscriber};
 
 mod compacter;
 mod constants;
+mod env_config;
 mod error;
 mod lock;
 mod parquet_writer;
@@ -39,9 +41,14 @@ fn setup_tracing() -> Result<(), Error> {
 }
 
 async fn function_handler(_event: LambdaEvent<Value>) -> Result<Value, Error> {
+    let env_config = EnvConfig::from_env();
+    info!(
+        "running lambda function {}",
+        env_config.lambda_function_name
+    );
     info!("get s3 and transfer clients");
     let (s3_client, transfer_client) = S3::clients().await;
-    let bucket = S3_BUCKET;
+    let bucket = env_config.s3_bucket.as_str();
     let Some(lock) = LockGuard::acquire(&s3_client, bucket, LOCK_KEY).await? else {
         info!("another invocation is already running; skipping");
         return Ok(json!({ "status": "skipped" }));
