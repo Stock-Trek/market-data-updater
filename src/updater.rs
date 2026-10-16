@@ -1,5 +1,6 @@
 use crate::{
     constants::{PARQUET_SUFFIX, UPDATE_QUANTIZATION, common_trading_pairs},
+    parquet_writer::writer_properties,
     quantized_time::QuantizedTime,
     s3::S3,
     subfolders::SubFolders,
@@ -185,7 +186,8 @@ impl KlinesUpdater {
         ];
         let batch = RecordBatch::try_new(schema.clone(), columns)?;
         let mut buffer = Vec::new();
-        let mut writer = ArrowWriter::try_new(&mut buffer, batch.schema(), None)?;
+        let mut writer =
+            ArrowWriter::try_new(&mut buffer, batch.schema(), Some(writer_properties()))?;
         writer.write(&batch)?;
         writer.close()?;
         let bytes = Bytes::from(buffer);

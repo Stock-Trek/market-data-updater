@@ -65,7 +65,7 @@ impl S3 {
     pub async fn delete_all(
         s3_client: &S3Client,
         bucket: &impl AsRef<str>,
-        keys: &Vec<String>,
+        keys: &[String],
     ) -> Result<()> {
         info!("delete files {:?}", keys);
         for chunk in keys.chunks(1000) {
