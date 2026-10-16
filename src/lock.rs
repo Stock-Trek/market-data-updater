@@ -14,8 +14,11 @@ const ACQUIRE_TIMEOUT: Duration = Duration::from_secs(60);
 const RETRY_INTERVAL: Duration = Duration::from_secs(5);
 
 pub struct LockGuard {
+    s3_client: S3Client,
+    bucket: String,
     key: String,
     e_tag: String,
+    released: bool,
 }
 
 impl LockGuard {
@@ -50,8 +53,11 @@ impl LockGuard {
                 let e_tag = output.e_tag().unwrap_or_default().to_string();
                 info!("acquired lock {} ({})", key, e_tag);
                 Ok(Some(Self {
+                    s3_client: s3_client.clone(),
+                    bucket: bucket.to_string(),
                     key: key.to_string(),
                     e_tag,
+                    released: false,
                 }))
             }
             Err(error) if Self::is_precondition_failed(&error) => Ok(None),
@@ -62,7 +68,8 @@ impl LockGuard {
     async fn take_over_stale(s3_client: &S3Client, bucket: &str, key: &str) -> Result<bool> {
         let head = match s3_client.head_object().bucket(bucket).key(key).send().await {
             Ok(head) => head,
-            Err(_) => return Ok(false),
+            Err(SdkError::ServiceError(error)) if error.err().is_not_found() => return Ok(false),
+            Err(error) => return Err(error.into()),
         };
         let Some(last_modified) = head
             .last_modified()
@@ -95,25 +102,13 @@ impl LockGuard {
         }
     }
 
-    pub async fn release(&self, s3_client: &S3Client, bucket: &str) -> Result<()> {
-        match s3_client
-            .delete_object()
-            .bucket(bucket)
-            .key(self.key.as_str())
-            .if_match(self.e_tag.as_str())
-            .send()
-            .await
-        {
-            Ok(_) => {
-                info!("released lock {}", self.key);
-                Ok(())
-            }
-            Err(error) if Self::is_precondition_failed(&error) => {
-                warn!("lock {} was taken over before release", self.key);
-                Ok(())
-            }
-            Err(error) => Err(error.into()),
+    pub async fn release(&mut self) -> Result<()> {
+        if self.released {
+            return Ok(());
         }
+        let result = delete_lock(&self.s3_client, &self.bucket, &self.key, &self.e_tag).await;
+        self.released = result.is_ok();
+        result
     }
 
     fn is_precondition_failed<E>(error: &SdkError<E>) -> bool
@@ -132,5 +127,51 @@ impl LockGuard {
             .is_some_and(|code| {
                 code == "PreconditionFailed" || code == "ConditionalRequestConflict"
             })
+    }
+}
+
+impl Drop for LockGuard {
+    fn drop(&mut self) {
+        if self.released {
+            return;
+        }
+        self.released = true;
+        let s3_client = self.s3_client.clone();
+        let bucket = self.bucket.clone();
+        let key = self.key.clone();
+        let e_tag = self.e_tag.clone();
+        match tokio::runtime::Handle::try_current() {
+            Ok(handle) => {
+                let _ = handle.spawn(async move {
+                    if let Err(error) = delete_lock(&s3_client, &bucket, &key, &e_tag).await {
+                        warn!("failed to release lock {} on drop: {error}", key);
+                    }
+                });
+            }
+            Err(_) => {
+                warn!("no tokio runtime available to release lock {} on drop", key);
+            }
+        }
+    }
+}
+
+async fn delete_lock(s3_client: &S3Client, bucket: &str, key: &str, e_tag: &str) -> Result<()> {
+    match s3_client
+        .delete_object()
+        .bucket(bucket)
+        .key(key)
+        .if_match(e_tag)
+        .send()
+        .await
+    {
+        Ok(_) => {
+            info!("released lock {}", key);
+            Ok(())
+        }
+        Err(error) if LockGuard::is_precondition_failed(&error) => {
+            warn!("lock {} was taken over before release", key);
+            Ok(())
+        }
+        Err(error) => Err(error.into()),
     }
 }
