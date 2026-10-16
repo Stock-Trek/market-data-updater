@@ -1,10 +1,8 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::{
-    constants::PARQUET_SUFFIX,
-    parquet_writer::writer_properties,
-    s3::{ParquetReader, S3},
-    subfolders::SubFolders,
+    constants::PARQUET_SUFFIX, parquet_reader::ParquetReader, parquet_writer::writer_properties,
+    s3::S3, subfolders::SubFolders,
 };
 use anyhow::Result;
 use aws_sdk_s3::Client as S3Client;

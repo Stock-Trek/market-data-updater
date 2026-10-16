@@ -12,6 +12,7 @@ mod constants;
 mod env_config;
 mod error;
 mod lock;
+mod parquet_reader;
 mod parquet_writer;
 mod quantized_time;
 mod s3;
