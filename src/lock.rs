@@ -10,7 +10,7 @@ use tokio::time::{Instant, sleep};
 use tracing::{info, warn};
 
 const STALE_AFTER: Duration = Duration::from_secs(16 * 60);
-const ACQUIRE_TIMEOUT: Duration = Duration::from_secs(5 * 60);
+const ACQUIRE_TIMEOUT: Duration = Duration::from_secs(60);
 const RETRY_INTERVAL: Duration = Duration::from_secs(5);
 
 pub struct LockGuard {
