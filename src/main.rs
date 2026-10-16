@@ -1,12 +1,19 @@
-use crate::{compacter::Compactor, constants::S3_BUCKET, s3::S3, updater::KlinesUpdater};
+use crate::{
+    compacter::Compactor,
+    constants::{LOCK_KEY, S3_BUCKET},
+    lock::LockGuard,
+    s3::S3,
+    updater::KlinesUpdater,
+};
 use lambda_runtime::{Error, LambdaEvent, run, service_fn};
 use serde_json::{Value, json};
-use tracing::info;
+use tracing::{error, info};
 use tracing_subscriber::{EnvFilter, fmt::Subscriber};
 
 mod compacter;
 mod constants;
 mod error;
+mod lock;
 mod parquet_writer;
 mod quantized_time;
 mod s3;
@@ -35,8 +42,25 @@ async fn function_handler(_event: LambdaEvent<Value>) -> Result<Value, Error> {
     info!("get s3 and transfer clients");
     let (s3_client, transfer_client) = S3::clients().await;
     let bucket = S3_BUCKET;
-    let updater = KlinesUpdater::try_new()?;
-    updater.update(&s3_client, &transfer_client, bucket).await?;
-    Compactor::all(&s3_client, &transfer_client, bucket).await?;
+    let Some(lock) = LockGuard::acquire(&s3_client, bucket, LOCK_KEY).await? else {
+        info!("another invocation is already running; skipping");
+        return Ok(json!({ "status": "skipped" }));
+    };
+    let result = process(&s3_client, &transfer_client, bucket).await;
+    if let Err(release_error) = lock.release(&s3_client, bucket).await {
+        error!("failed to release lock: {release_error}");
+    }
+    result?;
     Ok(json!({ "status": "ok" }))
+}
+
+async fn process(
+    s3_client: &aws_sdk_s3::Client,
+    transfer_client: &aws_sdk_s3_transfer_manager::Client,
+    bucket: &str,
+) -> Result<(), Error> {
+    let updater = KlinesUpdater::try_new()?;
+    updater.update(s3_client, transfer_client, bucket).await?;
+    Compactor::all(s3_client, transfer_client, bucket).await?;
+    Ok(())
 }
