@@ -1,9 +1,5 @@
 use crate::{
-    compacter::Compactor,
-    constants::LOCK_KEY,
-    env_config::EnvConfig,
-    lock::LockGuard,
-    s3::S3,
+    compacter::Compactor, constants::LOCK_KEY, env_config::EnvConfig, lock::LockGuard, s3::S3,
     updater::KlinesUpdater,
 };
 use lambda_runtime::{Error, LambdaEvent, run, service_fn};
