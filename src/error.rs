@@ -13,4 +13,6 @@ pub enum MduError {
     InvalidYearMonth { path: String },
     #[error("Cannot get subfolders from path with too many delimiters {path}")]
     TooManyPathSegments { path: String },
+    #[error("Date time out of range while trying to {operation}")]
+    DateTimeOutOfRange { operation: &'static str },
 }

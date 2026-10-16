@@ -1,5 +1,6 @@
 use crate::{
     constants::{PARQUET_SUFFIX, UPDATE_QUANTIZATION, common_trading_pairs},
+    error::MduResult,
     parquet_writer::writer_properties,
     quantized_time::{Quantization, QuantizedTime, TopOfHour, TopOfMonth},
     s3::S3,
@@ -48,7 +49,7 @@ impl KlinesUpdater {
         info!("update");
         let now = Utc::now();
         let schema = Self::create_schema();
-        let end_time = QuantizedTime::timestamp(now, UPDATE_QUANTIZATION);
+        let end_time = QuantizedTime::timestamp(now, UPDATE_QUANTIZATION)?;
         let mut join_set = JoinSet::new();
         for (cex_id_trading_mode, trading_pairs) in common_trading_pairs() {
             let s3_client = s3_client.clone();
@@ -123,7 +124,7 @@ impl KlinesUpdater {
                             .map(str::to_string)
                     })
                     .collect::<HashSet<_>>();
-                for (start_time, window_end_time) in Self::missing_windows(&existing, end_time) {
+                for (start_time, window_end_time) in Self::missing_windows(&existing, end_time)? {
                     let candles = updater_clone
                         .klines(&trading_pair, start_time, window_end_time)
                         .await?;
@@ -157,24 +158,24 @@ impl KlinesUpdater {
     fn missing_windows(
         existing: &HashSet<String>,
         end_time: DateTime<Utc>,
-    ) -> Vec<(DateTime<Utc>, DateTime<Utc>)> {
+    ) -> MduResult<Vec<(DateTime<Utc>, DateTime<Utc>)>> {
         let Some(mut start) = existing
             .iter()
             .filter_map(|path| Self::file_start_time(path.as_str()))
             .min()
         else {
-            return vec![(
-                QuantizedTime::previous_top(end_time, UPDATE_QUANTIZATION),
+            return Ok(vec![(
+                QuantizedTime::previous_top(end_time, UPDATE_QUANTIZATION)?,
                 end_time,
-            )];
+            )]);
         };
         let mut windows = Vec::new();
         while start < end_time {
-            if let Some(boundary) = Self::compacted_boundary(existing, start) {
+            if let Some(boundary) = Self::compacted_boundary(existing, start)? {
                 start = boundary;
                 continue;
             }
-            let window_end = QuantizedTime::next_top(start, UPDATE_QUANTIZATION);
+            let window_end = QuantizedTime::next_top(start, UPDATE_QUANTIZATION)?;
             if window_end > end_time {
                 break;
             }
@@ -183,46 +184,47 @@ impl KlinesUpdater {
             }
             start = window_end;
         }
-        windows
+        Ok(windows)
     }
 
     fn compacted_boundary(
         existing: &HashSet<String>,
         start_time: DateTime<Utc>,
-    ) -> Option<DateTime<Utc>> {
+    ) -> MduResult<Option<DateTime<Utc>>> {
         let (_, compacted) = Self::window_file_paths(start_time);
         if existing.contains(&compacted[3]) {
-            return Some(Self::next_year(start_time));
+            return Ok(Some(Self::next_year(start_time)?));
         }
         if existing.contains(&compacted[2]) {
-            return Some(Self::next_month(start_time));
+            return Ok(Some(Self::next_month(start_time)?));
         }
         if existing.contains(&compacted[1]) {
-            return Some(Self::next_day(start_time));
+            return Ok(Some(Self::next_day(start_time)?));
         }
         if existing.contains(&compacted[0]) {
-            return Some(Self::next_hour(start_time));
+            return Ok(Some(Self::next_hour(start_time)?));
         }
-        None
+        Ok(None)
     }
 
-    fn next_hour(timestamp: DateTime<Utc>) -> DateTime<Utc> {
-        let hour_start = QuantizedTime::timestamp(timestamp, Quantization::Hour(TopOfHour::One));
+    fn next_hour(timestamp: DateTime<Utc>) -> MduResult<DateTime<Utc>> {
+        let hour_start = QuantizedTime::timestamp(timestamp, Quantization::Hour(TopOfHour::One))?;
         QuantizedTime::next_top(hour_start, Quantization::Hour(TopOfHour::One))
     }
 
-    fn next_day(timestamp: DateTime<Utc>) -> DateTime<Utc> {
-        let day_start = QuantizedTime::timestamp(timestamp, Quantization::Day);
+    fn next_day(timestamp: DateTime<Utc>) -> MduResult<DateTime<Utc>> {
+        let day_start = QuantizedTime::timestamp(timestamp, Quantization::Day)?;
         QuantizedTime::next_top(day_start, Quantization::Day)
     }
 
-    fn next_month(timestamp: DateTime<Utc>) -> DateTime<Utc> {
-        let month_start = QuantizedTime::timestamp(timestamp, Quantization::Month(TopOfMonth::One));
+    fn next_month(timestamp: DateTime<Utc>) -> MduResult<DateTime<Utc>> {
+        let month_start =
+            QuantizedTime::timestamp(timestamp, Quantization::Month(TopOfMonth::One))?;
         QuantizedTime::next_top(month_start, Quantization::Month(TopOfMonth::One))
     }
 
-    fn next_year(timestamp: DateTime<Utc>) -> DateTime<Utc> {
-        let year_start = QuantizedTime::timestamp(timestamp, Quantization::Year);
+    fn next_year(timestamp: DateTime<Utc>) -> MduResult<DateTime<Utc>> {
+        let year_start = QuantizedTime::timestamp(timestamp, Quantization::Year)?;
         QuantizedTime::next_top(year_start, Quantization::Year)
     }
 
