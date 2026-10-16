@@ -128,13 +128,13 @@ impl KlinesUpdater {
                 );
                 let candles_file_path =
                     format!("{}/{}", candles_base_path, candles_relative_file_path);
-                if S3::has_file(&s3_client, &bucket, &candles_file_path).await {
+                if S3::has_file(&s3_client, &bucket, &candles_file_path).await? {
                     return Ok(());
                 }
                 for compacted_relative_file_path in &compacted_relative_file_paths {
                     let compacted_file_path =
                         format!("{}/{}", candles_base_path, compacted_relative_file_path);
-                    if S3::has_file(&s3_client, &bucket, &compacted_file_path).await {
+                    if S3::has_file(&s3_client, &bucket, &compacted_file_path).await? {
                         return Ok(());
                     }
                 }

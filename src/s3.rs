@@ -2,6 +2,7 @@ use anyhow::Result;
 use aws_config::BehaviorVersion;
 use aws_sdk_s3::{
     Client as S3Client,
+    error::SdkError,
     types::{Delete, ObjectIdentifier},
 };
 use aws_sdk_s3_transfer_manager::{Client as TransferClient, io::InputStream};
@@ -31,7 +32,7 @@ impl S3 {
         s3_client: &S3Client,
         bucket: &impl AsRef<str>,
         key: &impl AsRef<str>,
-    ) -> bool {
+    ) -> Result<bool> {
         info!("checking for file {}", key.as_ref());
         match s3_client
             .head_object()
@@ -40,8 +41,9 @@ impl S3 {
             .send()
             .await
         {
-            Ok(_) => true,
-            _ => false,
+            Ok(_) => Ok(true),
+            Err(SdkError::ServiceError(e)) if e.err().is_not_found() => Ok(false),
+            Err(e) => Err(e.into()),
         }
     }
 
