@@ -1,7 +1,7 @@
 use crate::{
     constants::{PARQUET_SUFFIX, UPDATE_QUANTIZATION, common_trading_pairs},
     parquet_writer::writer_properties,
-    quantized_time::QuantizedTime,
+    quantized_time::{Quantization, QuantizedTime, TopOfHour, TopOfMonth},
     s3::S3,
     subfolders::SubFolders,
     updaters::{binance_updater::BinanceUpdater, exchange_updater::ExchangeUpdater},
@@ -12,10 +12,13 @@ use arrow_schema::{DataType, Field, Schema, SchemaRef};
 use aws_sdk_s3::Client as S3Client;
 use aws_sdk_s3_transfer_manager::Client as TransferClient;
 use bytes::Bytes;
-use chrono::{DateTime, Datelike, Timelike, Utc};
+use chrono::{DateTime, Datelike, TimeZone, Timelike, Utc};
 use exchange_types::{klines::Kline, urls::TradingMode};
 use parquet::arrow::ArrowWriter;
-use std::{collections::HashMap, sync::Arc};
+use std::{
+    collections::{HashMap, HashSet},
+    sync::Arc,
+};
 use stock_trek_types::cex::{cex_id::CexId, trading_pair::TradingPair};
 use tokio::{sync::Semaphore, task::JoinSet};
 use tracing::info;
@@ -95,27 +98,11 @@ impl KlinesUpdater {
         updater: Arc<dyn ExchangeUpdater>,
     ) -> Result<()> {
         info!("update exchange {:?} @ end time {}", cex_id, end_time);
-        let start_time = QuantizedTime::previous_top(end_time, UPDATE_QUANTIZATION);
-        let year = start_time.year();
-        let month = start_time.month() as i32;
-        let day = start_time.day() as i32;
-        let hour = start_time.hour() as i32;
-        let minute = start_time.minute() as i32;
-        let candles_relative_file_path =
-            SubFolders::file_path(&[year, month, day, hour, minute], PARQUET_SUFFIX);
-        let compacted_relative_file_paths = [
-            SubFolders::file_path(&[year, month, day, hour], PARQUET_SUFFIX),
-            SubFolders::file_path(&[year, month, day], PARQUET_SUFFIX),
-            SubFolders::file_path(&[year, month], PARQUET_SUFFIX),
-            SubFolders::file_path(&[year], PARQUET_SUFFIX),
-        ];
         let semaphore = Arc::new(Semaphore::new(10));
         let mut join_set = JoinSet::new();
         for trading_pair in trading_pairs {
             info!("update symbol {:?}", trading_pair);
             let bucket = bucket.to_string();
-            let candles_relative_file_path = candles_relative_file_path.clone();
-            let compacted_relative_file_paths = compacted_relative_file_paths.clone();
             let schema = schema.clone();
             let semaphore = semaphore.clone();
             let s3_client = s3_client.clone();
@@ -127,24 +114,26 @@ impl KlinesUpdater {
                     "{}/{}/{}/{}",
                     trading_mode, cex_id, trading_pair.base, trading_pair.quote
                 );
-                let candles_file_path =
-                    format!("{}/{}", candles_base_path, candles_relative_file_path);
-                if S3::has_file(&s3_client, &bucket, &candles_file_path).await? {
-                    return Ok(());
+                let base_path_prefix = format!("{}/", candles_base_path);
+                let existing = S3::list_files(&s3_client, &bucket, &base_path_prefix)
+                    .await?
+                    .into_iter()
+                    .filter_map(|key| {
+                        key.strip_prefix(base_path_prefix.as_str())
+                            .map(str::to_string)
+                    })
+                    .collect::<HashSet<_>>();
+                for (start_time, window_end_time) in Self::missing_windows(&existing, end_time) {
+                    let candles = updater_clone
+                        .klines(&trading_pair, start_time, window_end_time)
+                        .await?;
+                    let candles_bytes = Self::candles_to_bytes(&candles, &schema)?;
+                    let candles_relative_file_path = Self::window_file_paths(start_time).0;
+                    let candles_file_path =
+                        format!("{}/{}", candles_base_path, candles_relative_file_path);
+                    S3::upload_bytes(&transfer_client, &bucket, &candles_file_path, candles_bytes)
+                        .await?;
                 }
-                for compacted_relative_file_path in &compacted_relative_file_paths {
-                    let compacted_file_path =
-                        format!("{}/{}", candles_base_path, compacted_relative_file_path);
-                    if S3::has_file(&s3_client, &bucket, &compacted_file_path).await? {
-                        return Ok(());
-                    }
-                }
-                let candles = updater_clone
-                    .klines(&trading_pair, start_time, end_time)
-                    .await?;
-                let candles_bytes = Self::candles_to_bytes(&candles, &schema)?;
-                S3::upload_bytes(&transfer_client, &bucket, &candles_file_path, candles_bytes)
-                    .await?;
                 Ok::<_, anyhow::Error>(())
             });
         }
@@ -152,6 +141,119 @@ impl KlinesUpdater {
             result??;
         }
         Ok(())
+    }
+
+    fn missing_windows(
+        existing: &HashSet<String>,
+        end_time: DateTime<Utc>,
+    ) -> Vec<(DateTime<Utc>, DateTime<Utc>)> {
+        let Some(mut start) = existing
+            .iter()
+            .filter_map(|path| Self::file_start_time(path.as_str()))
+            .min()
+        else {
+            return vec![(
+                QuantizedTime::previous_top(end_time, UPDATE_QUANTIZATION),
+                end_time,
+            )];
+        };
+        let mut windows = Vec::new();
+        while start < end_time {
+            if let Some(boundary) = Self::compacted_boundary(existing, start) {
+                start = boundary;
+                continue;
+            }
+            let window_end = QuantizedTime::next_top(start, UPDATE_QUANTIZATION);
+            if window_end > end_time {
+                break;
+            }
+            if !existing.contains(&Self::window_file_paths(start).0) {
+                windows.push((start, window_end));
+            }
+            start = window_end;
+        }
+        windows
+    }
+
+    fn compacted_boundary(
+        existing: &HashSet<String>,
+        start_time: DateTime<Utc>,
+    ) -> Option<DateTime<Utc>> {
+        let (_, compacted) = Self::window_file_paths(start_time);
+        if existing.contains(&compacted[3]) {
+            return Some(Self::next_year(start_time));
+        }
+        if existing.contains(&compacted[2]) {
+            return Some(Self::next_month(start_time));
+        }
+        if existing.contains(&compacted[1]) {
+            return Some(Self::next_day(start_time));
+        }
+        if existing.contains(&compacted[0]) {
+            return Some(Self::next_hour(start_time));
+        }
+        None
+    }
+
+    fn next_hour(timestamp: DateTime<Utc>) -> DateTime<Utc> {
+        let hour_start = QuantizedTime::timestamp(timestamp, Quantization::Hour(TopOfHour::One));
+        QuantizedTime::next_top(hour_start, Quantization::Hour(TopOfHour::One))
+    }
+
+    fn next_day(timestamp: DateTime<Utc>) -> DateTime<Utc> {
+        let day_start = QuantizedTime::timestamp(timestamp, Quantization::Day);
+        QuantizedTime::next_top(day_start, Quantization::Day)
+    }
+
+    fn next_month(timestamp: DateTime<Utc>) -> DateTime<Utc> {
+        let month_start = QuantizedTime::timestamp(timestamp, Quantization::Month(TopOfMonth::One));
+        QuantizedTime::next_top(month_start, Quantization::Month(TopOfMonth::One))
+    }
+
+    fn next_year(timestamp: DateTime<Utc>) -> DateTime<Utc> {
+        let year_start = QuantizedTime::timestamp(timestamp, Quantization::Year);
+        QuantizedTime::next_top(year_start, Quantization::Year)
+    }
+
+    fn window_file_paths(start_time: DateTime<Utc>) -> (String, [String; 4]) {
+        let year = start_time.year();
+        let month = start_time.month() as i32;
+        let day = start_time.day() as i32;
+        let hour = start_time.hour() as i32;
+        let minute = start_time.minute() as i32;
+        (
+            SubFolders::file_path(&[year, month, day, hour, minute], PARQUET_SUFFIX),
+            [
+                SubFolders::file_path(&[year, month, day, hour], PARQUET_SUFFIX),
+                SubFolders::file_path(&[year, month, day], PARQUET_SUFFIX),
+                SubFolders::file_path(&[year, month], PARQUET_SUFFIX),
+                SubFolders::file_path(&[year], PARQUET_SUFFIX),
+            ],
+        )
+    }
+
+    fn file_start_time(path: &str) -> Option<DateTime<Utc>> {
+        let path = path.strip_suffix(PARQUET_SUFFIX)?;
+        let mut segments = path.split('/');
+        let year = segments.next()?.parse::<i32>().ok()?;
+        let month = segments
+            .next()
+            .and_then(|segment| segment.parse::<u32>().ok())
+            .unwrap_or(1);
+        let day = segments
+            .next()
+            .and_then(|segment| segment.parse::<u32>().ok())
+            .unwrap_or(1);
+        let hour = segments
+            .next()
+            .and_then(|segment| segment.parse::<u32>().ok())
+            .unwrap_or(0);
+        let minute = segments
+            .next()
+            .and_then(|segment| segment.parse::<u32>().ok())
+            .unwrap_or(0);
+        Utc.with_ymd_and_hms(year, month, day, hour, minute, 0)
+            .single()
     }
 
     fn create_schema() -> SchemaRef {

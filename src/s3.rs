@@ -47,6 +47,30 @@ impl S3 {
         }
     }
 
+    pub async fn list_files(
+        s3_client: &S3Client,
+        bucket: &impl AsRef<str>,
+        prefix: &impl AsRef<str>,
+    ) -> Result<Vec<String>> {
+        info!("listing files with prefix {}", prefix.as_ref());
+        let mut files = Vec::new();
+        let mut paginator = s3_client
+            .list_objects_v2()
+            .bucket(bucket.as_ref())
+            .prefix(prefix.as_ref())
+            .into_paginator()
+            .send();
+        while let Some(page_result) = paginator.next().await {
+            let page = page_result?;
+            for object in page.contents() {
+                if let Some(key) = object.key() {
+                    files.push(key.to_string());
+                }
+            }
+        }
+        Ok(files)
+    }
+
     #[allow(dead_code)]
     pub async fn delete(
         s3_client: &S3Client,
