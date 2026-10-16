@@ -1,3 +1,5 @@
+use std::{ops::Range, path::Path, sync::Arc};
+
 use anyhow::Result;
 use aws_config::BehaviorVersion;
 use aws_sdk_s3::{
@@ -7,6 +9,12 @@ use aws_sdk_s3::{
 };
 use aws_sdk_s3_transfer_manager::{Client as TransferClient, io::InputStream};
 use bytes::Bytes;
+use futures::{FutureExt, future::BoxFuture};
+use parquet::{
+    arrow::{arrow_reader::ArrowReaderOptions, async_reader::AsyncFileReader},
+    errors::{ParquetError, Result as ParquetResult},
+    file::metadata::{ParquetMetaData, ParquetMetaDataReader},
+};
 use tokio::io::AsyncWriteExt;
 use tracing::info;
 
@@ -45,6 +53,21 @@ impl S3 {
             Err(SdkError::ServiceError(e)) if e.err().is_not_found() => Ok(false),
             Err(e) => Err(e.into()),
         }
+    }
+
+    pub async fn object_size(
+        s3_client: &S3Client,
+        bucket: &impl AsRef<str>,
+        key: &impl AsRef<str>,
+    ) -> Result<u64> {
+        info!("get size for file {}", key.as_ref());
+        let output = s3_client
+            .head_object()
+            .bucket(bucket.as_ref())
+            .key(key.as_ref())
+            .send()
+            .await?;
+        Ok(output.content_length().unwrap_or_default().max(0) as u64)
     }
 
     pub async fn list_files(
@@ -115,26 +138,6 @@ impl S3 {
         Ok(())
     }
 
-    pub async fn download_bytes(
-        transfer_client: &TransferClient,
-        bucket: &impl AsRef<str>,
-        key: &impl AsRef<str>,
-    ) -> Result<Bytes> {
-        info!("download bytes for key {}", key.as_ref());
-        let mut handle = transfer_client
-            .download()
-            .bucket(bucket.as_ref())
-            .key(key.as_ref())
-            .initiate()?;
-        let mut file_data = Vec::new();
-        while let Some(chunk_result) = handle.body_mut().next().await {
-            let chunk = chunk_result?.data.into_bytes();
-            file_data.extend_from_slice(&chunk);
-        }
-        let bytes = Bytes::from(file_data);
-        Ok(bytes)
-    }
-
     pub async fn upload_bytes(
         transfer_client: &TransferClient,
         bucket: &impl AsRef<str>,
@@ -159,7 +162,7 @@ impl S3 {
         transfer_client: &TransferClient,
         bucket: &impl AsRef<str>,
         key: &impl AsRef<str>,
-        file_path: &impl AsRef<str>,
+        file_path: &impl AsRef<Path>,
     ) -> Result<()> {
         let mut handle = transfer_client
             .download()
@@ -174,12 +177,11 @@ impl S3 {
         Ok(())
     }
 
-    #[allow(dead_code)]
     pub async fn upload_file(
         transfer_client: &TransferClient,
         bucket: &impl AsRef<str>,
         key: &impl AsRef<str>,
-        file_path: &impl AsRef<str>,
+        file_path: &impl AsRef<Path>,
     ) -> Result<()> {
         let stream = InputStream::from_path(file_path.as_ref())?;
         transfer_client
@@ -191,5 +193,84 @@ impl S3 {
             .join()
             .await?;
         Ok(())
+    }
+}
+
+#[derive(Clone)]
+pub struct ParquetReader {
+    transfer_client: TransferClient,
+    bucket: String,
+    key: String,
+    file_size: u64,
+}
+
+impl ParquetReader {
+    pub fn new(transfer_client: &TransferClient, bucket: &str, key: &str, file_size: u64) -> Self {
+        Self {
+            transfer_client: transfer_client.clone(),
+            bucket: bucket.to_string(),
+            key: key.to_string(),
+            file_size,
+        }
+    }
+
+    async fn fetch_range(&self, range: Range<u64>) -> ParquetResult<Bytes> {
+        if range.start >= range.end {
+            return Ok(Bytes::new());
+        }
+        let range_header = format!("bytes={}-{}", range.start, range.end - 1);
+        let mut handle = self
+            .transfer_client
+            .download()
+            .bucket(&self.bucket)
+            .key(&self.key)
+            .range(range_header)
+            .initiate()
+            .map_err(|error| ParquetError::External(Box::new(error)))?;
+        let mut data = Vec::with_capacity((range.end - range.start) as usize);
+        while let Some(chunk) = handle.body_mut().next().await {
+            let chunk = chunk.map_err(|error| ParquetError::External(Box::new(error)))?;
+            data.extend_from_slice(&chunk.data.into_bytes());
+        }
+        Ok(Bytes::from(data))
+    }
+}
+
+impl AsyncFileReader for ParquetReader {
+    fn get_bytes(&mut self, range: Range<u64>) -> BoxFuture<'_, ParquetResult<Bytes>> {
+        async move { self.fetch_range(range).await }.boxed()
+    }
+
+    fn get_byte_ranges(
+        &mut self,
+        ranges: Vec<Range<u64>>,
+    ) -> BoxFuture<'_, ParquetResult<Vec<Bytes>>> {
+        let reader = self.clone();
+        async move {
+            let fetches = ranges
+                .into_iter()
+                .map(|range| {
+                    let reader = reader.clone();
+                    async move { reader.fetch_range(range).await }
+                })
+                .collect::<Vec<_>>();
+            futures::future::try_join_all(fetches).await
+        }
+        .boxed()
+    }
+
+    fn get_metadata<'a>(
+        &'a mut self,
+        options: Option<&'a ArrowReaderOptions>,
+    ) -> BoxFuture<'a, ParquetResult<Arc<ParquetMetaData>>> {
+        async move {
+            let file_size = self.file_size;
+            let metadata = ParquetMetaDataReader::new()
+                .with_arrow_reader_options(options)
+                .load_and_finish(self, file_size)
+                .await?;
+            Ok(Arc::new(metadata))
+        }
+        .boxed()
     }
 }

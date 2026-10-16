@@ -9,7 +9,7 @@ impl SubFolders {
     pub fn subfolders_from_path(path: &str) -> MduResult<Vec<String>> {
         let segments: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
         match segments.len() {
-            0 | 1 | 2 | 3 | 4 => Ok(Vec::new()),
+            0..=4 => Ok(Vec::new()),
             5 => Ok(Self::subfolders(&MONTHS)),
             6 => {
                 let year = segments[4]

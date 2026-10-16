@@ -2610,6 +2610,7 @@ dependencies = [
  "chrono",
  "exchange-gateway",
  "exchange-types",
+ "futures",
  "hashbrown 0.17.1",
  "lambda_runtime",
  "parquet",
@@ -2872,6 +2873,7 @@ dependencies = [
  "bytes",
  "chrono",
  "flate2",
+ "futures",
  "half",
  "hashbrown 0.17.1",
  "lz4_flex",
@@ -2881,6 +2883,7 @@ dependencies = [
  "seq-macro",
  "simdutf8",
  "snap",
+ "tokio",
  "twox-hash",
  "zstd",
 ]

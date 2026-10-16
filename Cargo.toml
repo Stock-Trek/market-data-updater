@@ -15,9 +15,10 @@ bytes = "1.11.1"
 chrono = "0.4.44"
 exchange-gateway = { version = "0.12.5", registry = "shipyard" }
 exchange-types = { version = "0.13.1", registry = "shipyard" }
+futures = "0.3"
 hashbrown = "0.17.1"
 lambda_runtime = "1.1.3"
-parquet = "60.0.0"
+parquet = { version = "60.0.0", features = ["async"] }
 serde_json = "1.0.149"
 stock-trek-types = "0.4.2"
 thiserror = "2.0.20"
