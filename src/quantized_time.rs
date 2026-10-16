@@ -64,6 +64,26 @@ impl QuantizedTime {
         }
     }
 
+    pub fn next_top(top: DateTime<Utc>, quantization: Quantization) -> DateTime<Utc> {
+        match quantization {
+            Quantization::Minutes(top_of_minute) => top + Duration::minutes(top_of_minute as i64),
+            Quantization::Hour(top_of_hour) => top + Duration::hours(top_of_hour as i64),
+            Quantization::Day => top + Duration::days(1),
+            Quantization::Week(_) => top + Duration::weeks(1),
+            Quantization::Month(top_of_month) => {
+                let total_months =
+                    top.year() as i64 * 12 + top.month0() as i64 + top_of_month as i64;
+                let next_year = total_months.div_euclid(12) as i32;
+                let next_month = total_months.rem_euclid(12) as u32 + 1;
+                top.with_year(next_year)
+                    .unwrap()
+                    .with_month(next_month)
+                    .unwrap()
+            }
+            Quantization::Year => top.with_year(top.year() + 1).unwrap(),
+        }
+    }
+
     pub fn previous_top(top: DateTime<Utc>, quantization: Quantization) -> DateTime<Utc> {
         match quantization {
             Quantization::Minutes(top_of_minute) => top - Duration::minutes(top_of_minute as i64),
