@@ -5,6 +5,7 @@ use stock_trek_types::cex::{asset_id::AssetId, cex_id::CexId, trading_pair::Trad
 
 pub const S3_BUCKET: &str = "stock-trek-market-data";
 pub const PARQUET_SUFFIX: &str = ".parquet";
+pub const LOCK_KEY: &str = "_locks/market-data-updater";
 
 pub const UPDATE_QUANTIZATION: Quantization = Quantization::Minutes(TopOfMinute::Six);
 pub const KLINE_LIMIT: Option<u16> = Some(10);
