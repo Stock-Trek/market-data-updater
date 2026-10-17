@@ -45,7 +45,7 @@ fn setup_tracing() -> MduResult<()> {
 }
 
 async fn function_handler(_event: LambdaEvent<Value>) -> Result<Value, Error> {
-    let env_config = EnvConfig::from_env();
+    let env_config = EnvConfig::from_env()?;
     info!(
         "running lambda function {}",
         env_config.lambda_function_name
