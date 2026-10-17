@@ -53,6 +53,8 @@ pub enum MduError {
     UnknownSubmissionOutcome { exchange: &'static str },
     #[error("Failed to initialize tracing: {message}")]
     Tracing { message: String },
+    #[error("Failed to acquire lock {key}: another invocation is already running")]
+    LockContention { key: String },
     #[error("Month {month} must be between 1 and 12")]
     InvalidMonth { month: u32 },
     #[error("Failed to parse year and month from path {path}")]
