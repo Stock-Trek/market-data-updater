@@ -53,10 +53,7 @@ async fn function_handler(_event: LambdaEvent<Value>) -> Result<Value, Error> {
     info!("get s3 and transfer clients");
     let (s3_client, transfer_client) = S3::clients().await;
     let bucket = env_config.s3_bucket.as_str();
-    let Some(mut lock) = LockGuard::acquire(&s3_client, bucket, LOCK_KEY).await? else {
-        info!("another invocation is already running; skipping");
-        return Ok(json!({ "status": "skipped" }));
-    };
+    let mut lock = LockGuard::acquire(&s3_client, bucket, LOCK_KEY).await?;
     let result = process(&s3_client, &transfer_client, bucket).await;
     if let Err(release_error) = lock.release().await {
         error!("failed to release lock: {release_error}");

@@ -23,18 +23,20 @@ pub struct LockGuard {
 }
 
 impl LockGuard {
-    pub async fn acquire(s3_client: &S3Client, bucket: &str, key: &str) -> MduResult<Option<Self>> {
+    pub async fn acquire(s3_client: &S3Client, bucket: &str, key: &str) -> MduResult<Self> {
         let deadline = Instant::now() + ACQUIRE_TIMEOUT;
         loop {
             if let Some(guard) = Self::try_acquire(s3_client, bucket, key).await? {
-                return Ok(Some(guard));
+                return Ok(guard);
             }
             if Self::take_over_stale(s3_client, bucket, key).await? {
                 continue;
             }
             if Instant::now() >= deadline {
                 warn!("timed out waiting for lock {}", key);
-                return Ok(None);
+                return Err(MduError::LockContention {
+                    key: key.to_string(),
+                });
             }
             sleep(RETRY_INTERVAL).await;
         }
