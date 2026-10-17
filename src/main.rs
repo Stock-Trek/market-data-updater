@@ -1,5 +1,10 @@
 use crate::{
-    compacter::Compactor, constants::LOCK_KEY, env_config::EnvConfig, lock::LockGuard, s3::S3,
+    compacter::Compactor,
+    constants::LOCK_KEY,
+    env_config::EnvConfig,
+    error::{MduError, MduResult},
+    lock::LockGuard,
+    s3::S3,
     updater::KlinesUpdater,
 };
 use lambda_runtime::{Error, LambdaEvent, run, service_fn};
@@ -26,14 +31,16 @@ async fn main() -> Result<(), Error> {
     run(service_fn(function_handler)).await
 }
 
-fn setup_tracing() -> Result<(), Error> {
+fn setup_tracing() -> MduResult<()> {
     info!("set up tracing");
     let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
     let subscriber = Subscriber::builder()
         .with_ansi(false)
         .with_env_filter(filter)
         .finish();
-    tracing::subscriber::set_global_default(subscriber).expect("Failed to set subscriber");
+    tracing::subscriber::set_global_default(subscriber).map_err(|error| MduError::Tracing {
+        message: error.to_string(),
+    })?;
     Ok(())
 }
 
@@ -62,7 +69,7 @@ async fn process(
     s3_client: &aws_sdk_s3::Client,
     transfer_client: &aws_sdk_s3_transfer_manager::Client,
     bucket: &str,
-) -> Result<(), Error> {
+) -> MduResult<()> {
     let updater = KlinesUpdater::try_new()?;
     updater.update(s3_client, transfer_client, bucket).await?;
     Compactor::all(s3_client, transfer_client, bucket).await?;

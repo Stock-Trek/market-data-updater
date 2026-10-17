@@ -1,13 +1,12 @@
 use crate::{
     constants::{PARQUET_SUFFIX, UPDATE_QUANTIZATION, common_trading_pairs},
-    error::MduResult,
+    error::{MduError, MduResult},
     parquet_writer::writer_properties,
     quantized_time::{Quantization, QuantizedTime, TopOfHour, TopOfMonth},
     s3::S3,
     subfolders::SubFolders,
     updaters::{binance_updater::BinanceUpdater, exchange_updater::ExchangeUpdater},
 };
-use anyhow::Result;
 use arrow_array::{ArrayRef, Float64Array, Int64Array, RecordBatch};
 use arrow_schema::{DataType, Field, Schema, SchemaRef};
 use aws_sdk_s3::Client as S3Client;
@@ -28,8 +27,17 @@ pub struct KlinesUpdater {
     binance: HashMap<TradingMode, Arc<dyn ExchangeUpdater>>,
 }
 
+struct ExchangeUpdate {
+    cex_id: CexId,
+    trading_mode: TradingMode,
+    trading_pairs: Vec<TradingPair>,
+    schema: SchemaRef,
+    end_time: DateTime<Utc>,
+    updater: Arc<dyn ExchangeUpdater>,
+}
+
 impl KlinesUpdater {
-    pub fn try_new() -> Result<Self> {
+    pub fn try_new() -> MduResult<Self> {
         let mut binance: HashMap<TradingMode, Arc<dyn ExchangeUpdater>> = HashMap::new();
         for trading_mode in [TradingMode::Paper, TradingMode::Real] {
             binance.insert(
@@ -45,7 +53,7 @@ impl KlinesUpdater {
         s3_client: &S3Client,
         transfer_client: &TransferClient,
         bucket: &str,
-    ) -> Result<()> {
+    ) -> MduResult<()> {
         info!("update");
         let now = Utc::now();
         let schema = Self::create_schema();
@@ -59,24 +67,30 @@ impl KlinesUpdater {
             let trading_mode = cex_id_trading_mode.1;
             let schema = schema.clone();
             let updater = match cex_id {
-                CexId::Binance => {
-                    self.binance.get(&trading_mode).cloned().ok_or_else(|| {
-                        anyhow::anyhow!("Unsupported trading mode: {trading_mode:?}")
-                    })?
+                CexId::Binance => self.binance.get(&trading_mode).cloned().ok_or_else(|| {
+                    MduError::UnsupportedTradingMode {
+                        trading_mode: format!("{trading_mode:?}"),
+                    }
+                })?,
+                other => {
+                    return Err(MduError::UnsupportedExchange {
+                        exchange: format!("{other:?}"),
+                    });
                 }
-                other => anyhow::bail!("Unsupported exchange: {other:?}"),
             };
             join_set.spawn(async move {
                 Self::update_exchange(
                     &s3_client,
                     &transfer_client,
                     &bucket,
-                    cex_id,
-                    trading_mode,
-                    trading_pairs,
-                    &schema,
-                    end_time,
-                    updater.clone(),
+                    ExchangeUpdate {
+                        cex_id,
+                        trading_mode,
+                        trading_pairs,
+                        schema,
+                        end_time,
+                        updater,
+                    },
                 )
                 .await
             });
@@ -91,13 +105,16 @@ impl KlinesUpdater {
         s3_client: &S3Client,
         transfer_client: &TransferClient,
         bucket: &str,
-        cex_id: CexId,
-        trading_mode: TradingMode,
-        trading_pairs: Vec<TradingPair>,
-        schema: &SchemaRef,
-        end_time: DateTime<Utc>,
-        updater: Arc<dyn ExchangeUpdater>,
-    ) -> Result<()> {
+        update: ExchangeUpdate,
+    ) -> MduResult<()> {
+        let ExchangeUpdate {
+            cex_id,
+            trading_mode,
+            trading_pairs,
+            schema,
+            end_time,
+            updater,
+        } = update;
         info!("update exchange {:?} @ end time {}", cex_id, end_time);
         let semaphore = Arc::new(Semaphore::new(10));
         let mut join_set = JoinSet::new();
@@ -110,7 +127,10 @@ impl KlinesUpdater {
             let transfer_client = transfer_client.clone();
             let updater_clone = updater.clone();
             join_set.spawn(async move {
-                let _permit = semaphore.acquire_owned().await.unwrap();
+                let _permit = semaphore
+                    .acquire_owned()
+                    .await
+                    .map_err(|_| MduError::SemaphoreClosed)?;
                 let candles_base_path = format!(
                     "{}/{}/{}/{}",
                     trading_mode, cex_id, trading_pair.base, trading_pair.quote
@@ -146,7 +166,7 @@ impl KlinesUpdater {
                     S3::upload_bytes(&transfer_client, &bucket, &candles_file_path, candles_bytes)
                         .await?;
                 }
-                Ok::<_, anyhow::Error>(())
+                Ok::<_, MduError>(())
             });
         }
         while let Some(result) = join_set.join_next().await {
@@ -298,7 +318,7 @@ impl KlinesUpdater {
         })
     }
 
-    fn candles_to_bytes(candles: &[Kline], schema: &SchemaRef) -> Result<Bytes> {
+    fn candles_to_bytes(candles: &[Kline], schema: &SchemaRef) -> MduResult<Bytes> {
         let columns: Vec<ArrayRef> = vec![
             Arc::new(Int64Array::from_iter(candles.iter().map(|k| k.open_time.0))),
             Arc::new(Float64Array::from_iter(
