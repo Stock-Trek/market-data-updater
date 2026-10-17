@@ -1,10 +1,13 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::{
-    constants::PARQUET_SUFFIX, parquet_reader::ParquetReader, parquet_writer::writer_properties,
-    s3::S3, subfolders::SubFolders,
+    constants::PARQUET_SUFFIX,
+    error::{MduError, MduResult},
+    parquet_reader::ParquetReader,
+    parquet_writer::writer_properties,
+    s3::S3,
+    subfolders::SubFolders,
 };
-use anyhow::Result;
 use aws_sdk_s3::Client as S3Client;
 use aws_sdk_s3_transfer_manager::Client as TransferClient;
 use futures::TryStreamExt;
@@ -28,7 +31,7 @@ impl Compactor {
         s3_client: &S3Client,
         transfer_client: &TransferClient,
         bucket: &str,
-    ) -> Result<()> {
+    ) -> MduResult<()> {
         info!("compact all");
         Self::folder(s3_client, transfer_client, bucket, "", PARQUET_SUFFIX).await?;
         Ok(())
@@ -40,7 +43,7 @@ impl Compactor {
         bucket: &str,
         prefix: &str,
         suffix: &str,
-    ) -> Result<()> {
+    ) -> MduResult<()> {
         info!("compact folder with prefix {}", prefix);
         let expected_subfolders = SubFolders::subfolders_from_path(prefix)?;
         if !expected_subfolders.is_empty() {
@@ -105,7 +108,7 @@ impl Compactor {
         bucket: &str,
         prefix: &str,
         suffix: &str,
-    ) -> Result<SubfoldersFiles> {
+    ) -> MduResult<SubfoldersFiles> {
         info!("find subfolders and files for prefix {}", prefix);
         let mut list_request = s3_client.list_objects_v2().bucket(bucket).delimiter("/");
         if !prefix.is_empty() {
@@ -115,7 +118,13 @@ impl Compactor {
         let mut files = Vec::new();
         let mut subfolders = Vec::new();
         while let Some(page_result) = paginator.next().await {
-            let page = page_result?;
+            let page = page_result.map_err(|error| {
+                MduError::s3(
+                    "list subfolders and files",
+                    format!("s3://{}/{}", bucket, prefix),
+                    error,
+                )
+            })?;
             subfolders.extend(
                 page.common_prefixes()
                     .iter()
@@ -139,7 +148,7 @@ impl Compactor {
         bucket: &str,
         files: &[String],
         compacted_file: &str,
-    ) -> Result<()> {
+    ) -> MduResult<()> {
         info!("compact files {:?} to {}", files, compacted_file);
         if files.is_empty() {
             warn!("No data to compact");
@@ -161,7 +170,7 @@ impl Compactor {
         bucket: &str,
         files: &[String],
         compacted_file: &str,
-    ) -> Result<bool> {
+    ) -> MduResult<bool> {
         info!("compact {} files", files.len());
         let temp_path = Self::temp_file_path();
         let mut writer: Option<AsyncArrowWriter<File>> = None;
@@ -175,7 +184,13 @@ impl Compactor {
                     .build()?;
                 while let Some(batch) = stream.try_next().await? {
                     if writer.is_none() {
-                        let output = File::create(&temp_path).await?;
+                        let output = File::create(&temp_path).await.map_err(|error| {
+                            MduError::io(
+                                "create temporary compaction file",
+                                temp_path.display().to_string(),
+                                error,
+                            )
+                        })?;
                         writer = Some(AsyncArrowWriter::try_new(
                             output,
                             batch.schema(),
@@ -187,11 +202,11 @@ impl Compactor {
                     }
                 }
             }
-            Ok::<_, anyhow::Error>(())
+            Ok::<_, MduError>(())
         }
         .await;
         if let Err(error) = result {
-            tokio::fs::remove_file(&temp_path).await.ok();
+            Self::remove_temp_file(&temp_path).await;
             return Err(error);
         }
         let Some(writer) = writer else {
@@ -200,8 +215,17 @@ impl Compactor {
         };
         writer.close().await?;
         S3::upload_file(transfer_client, &bucket, &compacted_file, &temp_path).await?;
-        tokio::fs::remove_file(&temp_path).await.ok();
+        Self::remove_temp_file(&temp_path).await;
         Ok(true)
+    }
+
+    async fn remove_temp_file(temp_path: &std::path::Path) {
+        if let Err(error) = tokio::fs::remove_file(temp_path).await {
+            warn!(
+                "failed to remove temporary compaction file {}: {error}",
+                temp_path.display()
+            );
+        }
     }
 
     fn temp_file_path() -> std::path::PathBuf {

@@ -1,4 +1,4 @@
-use anyhow::Result;
+use crate::error::MduResult;
 use chrono::{DateTime, Utc};
 use exchange_gateway::async_trait;
 use exchange_types::klines::Kline;
@@ -11,5 +11,5 @@ pub trait ExchangeUpdater: Send + Sync {
         trading_pair: &TradingPair,
         start_time: DateTime<Utc>,
         end_time: DateTime<Utc>,
-    ) -> Result<Vec<Kline>>;
+    ) -> MduResult<Vec<Kline>>;
 }

@@ -9,6 +9,8 @@ use parquet::{
     file::metadata::{ParquetMetaData, ParquetMetaDataReader},
 };
 
+use crate::error::MduError;
+
 #[derive(Clone)]
 pub struct ParquetReader {
     transfer_client: TransferClient,
@@ -32,6 +34,7 @@ impl ParquetReader {
             return Ok(Bytes::new());
         }
         let range_header = format!("bytes={}-{}", range.start, range.end - 1);
+        let target = format!("s3://{}/{}", self.bucket, self.key);
         let mut handle = self
             .transfer_client
             .download()
@@ -39,10 +42,22 @@ impl ParquetReader {
             .key(&self.key)
             .range(range_header)
             .initiate()
-            .map_err(|error| ParquetError::External(Box::new(error)))?;
+            .map_err(|error| {
+                ParquetError::External(Box::new(MduError::s3(
+                    "start ranged download",
+                    target.clone(),
+                    error,
+                )))
+            })?;
         let mut data = Vec::with_capacity((range.end - range.start) as usize);
         while let Some(chunk) = handle.body_mut().next().await {
-            let chunk = chunk.map_err(|error| ParquetError::External(Box::new(error)))?;
+            let chunk = chunk.map_err(|error| {
+                ParquetError::External(Box::new(MduError::s3(
+                    "read ranged download",
+                    target.clone(),
+                    error,
+                )))
+            })?;
             data.extend_from_slice(&chunk.data.into_bytes());
         }
         Ok(Bytes::from(data))
