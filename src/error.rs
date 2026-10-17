@@ -53,6 +53,10 @@ pub enum MduError {
     UnknownSubmissionOutcome { exchange: &'static str },
     #[error("Failed to initialize tracing: {message}")]
     Tracing { message: String },
+    #[error("Missing required environment variable {name}")]
+    MissingEnvVar { name: &'static str },
+    #[error("Environment variable {name} must not be empty")]
+    EmptyEnvVar { name: &'static str },
     #[error("Failed to acquire lock {key}: another invocation is already running")]
     LockContention { key: String },
     #[error("Month {month} must be between 1 and 12")]
